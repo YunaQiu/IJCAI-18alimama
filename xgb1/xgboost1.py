@@ -68,8 +68,8 @@ def scalerFea(df, cols):
 
 # 转化数据集字段格式，并去重
 def formatDf(df):
-    strCols = ['instance_id','item_id','user_id','context_id','shop_id','item_brand_id','item_city_id','user_gender_id','user_occupation_id']
-    df[strCols] = df[strCols].astype('str')
+    # strCols = ['instance_id','item_id','user_id','context_id','shop_id','item_brand_id','item_city_id','user_gender_id','user_occupation_id']
+    # df[strCols] = df[strCols].astype('str')
     df = df.applymap(lambda x: np.nan if (x==-1)|(x=='-1') else x)
     df.drop_duplicates(inplace=True)
     df['context_timestamp'] = pd.to_datetime(df.context_timestamp, unit='s')
@@ -117,46 +117,31 @@ def addItemFea(df, hisDf=None):
     else:
         originDf = df.copy()
     tempDf = pd.pivot_table(originDf, index=['item_id','date'], values='is_trade', aggfunc=[len, sum])
-    tempDf.columns = ['click','trade']
+    tempDf.columns = ['show','trade']
     tempDf.reset_index(inplace=True)
     tempDf['same_item'] = tempDf['item_id'].shift(1)
     tempDf['same_item'] = tempDf['item_id'] == tempDf['same_item']
-    clickList = []
+    showList = []
     tradeList = []
-    clickTemp = tradeTemp = 0
-    for same,c,t in tempDf[['same_item','click','trade']].values:
-        clickList.append(clickTemp if same else 0)
+    showTemp = tradeTemp = 0
+    for same,c,t in tempDf[['same_item','show','trade']].values:
+        showList.append(showTemp if same else 0)
         tradeList.append(tradeTemp if same else 0)
-        clickTemp = clickTemp+c if same else c
+        showTemp = showTemp+c if same else c
         tradeTemp = tradeTemp+t if same else t
-    tempDf['item_his_click'] = clickList
+    tempDf['item_his_show'] = showList
     tempDf['item_his_trade'] = tradeList
-    tempDf['item_his_trade_ratio'] = tempDf['item_his_trade'] / tempDf['item_his_click']
-    df = df.merge(tempDf[['item_id','date','item_his_click','item_his_trade','item_his_trade_ratio']], how='left', on=['item_id','date'])
+    tempDf['item_his_trade_ratio'] = tempDf['item_his_trade'] / tempDf['item_his_show']
+    df = df.merge(tempDf[['item_id','date','item_his_show','item_his_trade','item_his_trade_ratio']], how='left', on=['item_id','date'])
     df['item_his_trade_ratio'].fillna(0, inplace=True)
 
-    tempDf = pd.pivot_table(originDf, index=['item_id','context_timestamp'], values=['is_trade'], aggfunc=len)
-    tempDf.columns = ['click']
-    tempDf.reset_index(inplace=True)
-    tempDf['last_item_id'] = tempDf['item_id'].shift(1)
-    tempDf['last_item_id'] = tempDf['last_item_id']==tempDf['item_id']
-    tempDf['last_click_time'] = tempDf['context_timestamp'].shift(1)
-    tempDf.loc[~tempDf.last_item_id, 'last_click_time'] = np.nan
-    tempDf['item_last_click_timedelta'] = tempDf['context_timestamp'] - tempDf['last_click_time']
-    tempDf['item_last_click_timedelta'] = tempDf['item_last_click_timedelta'].dt.seconds
-    tempDf['item_last_click_timedelta'].fillna(999999, inplace=True)
-    hourClickList = []
-    hourClickTemp = {}
-    for same, dt, click in tempDf[['last_item_id','context_timestamp','click']].values:
-        if same:
-            [hourClickTemp.pop(k) for k in list(hourClickTemp) if k<dt-timedelta(hours=1)]
-            hourClickList.append(np.sum(list(hourClickTemp.values())))
-            hourClickTemp[dt] = click
-        else:
-            hourClickList.append(0)
-            hourClickTemp = {dt:click}
-    tempDf['item_lasthour_click'] = hourClickList
-    df = df.merge(tempDf[['item_id','context_timestamp','item_last_click_timedelta','item_lasthour_click']], how='left', on=['item_id','context_timestamp'])
+    # tempDf = pd.pivot_table(originDf, index=['item_id','date','hour'], values=['is_trade'], aggfunc=len)
+    # tempDf.columns = ['item_lasthour_show']
+    # tempDf.reset_index(inplace=True)
+    # tempDf.loc[tempDf.hour==11, 'date'] += timedelta(days=1)
+    # tempDf['hour'] = (tempDf['hour']+1)%12
+    # df = df.merge(tempDf[['item_id','date','hour','item_lasthour_show']], how='left', on=['item_id','date','hour'])
+    # df['item_lasthour_show'].fillna(0,inplace=True)
     return df
 
 # 添加用户维度特征
@@ -166,45 +151,81 @@ def addUserFea(df, hisDf=None):
     else:
         originDf = df.copy()
     tempDf = pd.pivot_table(originDf, index=['user_id','date'], values=['is_trade'], aggfunc=[len,np.sum])
-    tempDf.columns = ['click', 'trade']
+    tempDf.columns = ['show', 'trade']
     tempDf.reset_index(inplace=True)
     tempDf['last_user'] = tempDf['user_id'].shift(1)
     tempDf['last_user'] = tempDf['user_id']==tempDf['last_user']
-    clickList,tradeList = [[] for i in range(2)]
-    clickTemp = tradeTemp = 0
-    for same,click,trade in tempDf[['last_user','click', 'trade']].values:
-        clickList.append(clickTemp if same else 0)
-        clickTemp = clickTemp+click if same else click
+    showList,tradeList = [[] for i in range(2)]
+    showTemp = tradeTemp = 0
+    for same,show,trade in tempDf[['last_user','show', 'trade']].values:
+        showList.append(showTemp if same else 0)
+        showTemp = showTemp+show if same else show
         tradeList.append(tradeTemp if same else 0)
         tradeTemp = tradeTemp+trade if same else trade
-    tempDf['user_his_click'] = clickList
+    tempDf['user_his_show'] = showList
     tempDf['user_his_trade'] = tradeList
-    tempDf['user_his_trade_ratio'] = tempDf.user_his_trade / tempDf.user_his_click
-    df = df.merge(tempDf[['user_id','date','user_his_click', 'user_his_trade','user_his_trade_ratio']], how='left', on=['user_id','date'])
+    tempDf['user_his_trade_ratio'] = tempDf.user_his_trade / tempDf.user_his_show
+    df = df.merge(tempDf[['user_id','date','user_his_show', 'user_his_trade','user_his_trade_ratio']], how='left', on=['user_id','date'])
     df['user_his_trade_ratio'].fillna(0, inplace=True)
 
     tempDf = pd.pivot_table(originDf, index=['user_id','context_timestamp'], values=['is_trade'], aggfunc=len)
-    tempDf.columns = ['click']
+    tempDf.columns = ['show']
     tempDf.reset_index(inplace=True)
     tempDf['last_user_id'] = tempDf['user_id'].shift(1)
     tempDf['last_user_id'] = tempDf['last_user_id']==tempDf['user_id']
-    tempDf['last_click_time'] = tempDf['context_timestamp'].shift(1)
-    tempDf.loc[~tempDf.last_user_id, 'last_click_time'] = np.nan
-    tempDf['user_last_click_timedelta'] = tempDf['context_timestamp'] - tempDf['last_click_time']
-    tempDf['user_last_click_timedelta'] = tempDf['user_last_click_timedelta'].dt.seconds
-    tempDf['user_last_click_timedelta'].fillna(999999, inplace=True)
-    hourClickList = []
-    hourClickTemp = {}
-    for same, dt, click in tempDf[['last_user_id','context_timestamp','click']].values:
+    tempDf['last_show_time'] = tempDf['context_timestamp'].shift(1)
+    tempDf.loc[~tempDf.last_user_id, 'last_show_time'] = np.nan
+    tempDf['user_last_show_timedelta'] = tempDf['context_timestamp'] - tempDf['last_show_time']
+    tempDf['user_last_show_timedelta'] = tempDf['user_last_show_timedelta'].dt.seconds
+    tempDf['user_last_show_timedelta'].fillna(999999, inplace=True)
+    hourShowList = []
+    hourShowTemp = {}
+    for same, dt, show in tempDf[['last_user_id','context_timestamp','show']].values:
         if same:
-            [hourClickTemp.pop(k) for k in list(hourClickTemp) if k<dt-timedelta(hours=1)]
-            hourClickList.append(np.sum(list(hourClickTemp.values())))
-            hourClickTemp[dt] = click
+            [hourShowTemp.pop(k) for k in list(hourShowTemp) if k<dt-timedelta(hours=1)]
+            hourShowList.append(np.sum(list(hourShowTemp.values())))
+            hourShowTemp[dt] = show
         else:
-            hourClickList.append(0)
-            hourClickTemp = {dt:click}
-    tempDf['user_lasthour_click'] = hourClickList
-    df = df.merge(tempDf[['user_id','context_timestamp','user_last_click_timedelta','user_lasthour_click']], how='left', on=['user_id','context_timestamp'])
+            hourShowList.append(0)
+            hourShowTemp = {dt:show}
+    tempDf['user_lasthour_show'] = hourShowList
+    df = df.merge(tempDf[['user_id','context_timestamp','user_last_show_timedelta','user_lasthour_show']], how='left', on=['user_id','context_timestamp'])
+    return df
+
+# 添加用户与类目关联维度的特征
+def addUserCateFea(df, hisDf=None):
+    if isinstance(hisDf, pd.DataFrame):
+        originDf = pd.concat([hisDf,df],ignore_index=True)
+    else:
+        originDf = df.copy()
+    tempDf = pd.pivot_table(originDf, index=['user_id','item_category1','context_timestamp'], values=['is_trade'], aggfunc=len)
+    tempDf.columns = ['show']
+    tempDf.reset_index(inplace=True)
+    tempDf[['last_user','last_cate','last_time']] = tempDf[['user_id','item_category1','context_timestamp']].shift(1)
+    tempDf['same'] = (tempDf.user_id==tempDf.last_user) & (tempDf.item_category1==tempDf.last_cate)
+    tempDf.loc[~tempDf.same, 'last_time'] = np.nan
+    tempDf['uc_last_show_timedelta'] = tempDf['context_timestamp'] - tempDf['last_time']
+    tempDf['uc_last_show_timedelta'] = tempDf['uc_last_show_timedelta'].dt.seconds
+    tempDf['uc_last_show_timedelta'].fillna(999999, inplace=True)
+    hourShowList = []
+    hourShowTemp = {}
+    for same, dt, show in tempDf[['same','context_timestamp','show']].values:
+        if same:
+            [hourShowTemp.pop(k) for k in list(hourShowTemp) if k<dt-timedelta(hours=1)]
+            hourShowList.append(np.sum(list(hourShowTemp.values())))
+            hourShowTemp[dt] = show
+        else:
+            hourShowList.append(0)
+            hourShowTemp = {dt:show}
+    tempDf['uc_lasthour_show'] = hourShowList
+    df = df.merge(tempDf[['user_id','item_category1','context_timestamp','uc_last_show_timedelta','uc_lasthour_show']], how='left', on=['user_id','item_category1','context_timestamp'])
+
+    tempDf = pd.pivot_table(originDf, index=['user_id','item_category1','date'], values=['is_trade'], aggfunc=[len,np.sum])
+    tempDf.columns = ['uc_lastdate_show', 'uc_lastdate_trade']
+    tempDf.reset_index(inplace=True)
+    tempDf['date'] = tempDf['date'] + timedelta(days=1)
+    df = df.merge(tempDf[['user_id','item_category1','date','uc_lastdate_show', 'uc_lastdate_trade']], how='left', on=['user_id','item_category1','date'])
+    df.fillna({k:0 for k in ['uc_lastdate_show', 'uc_lastdate_trade']}, inplace=True)
     return df
 
 # 添加用户商品关联维度的特征
@@ -214,50 +235,61 @@ def addUserItemFea(df, hisDf=None):
     else:
         originDf = df.copy()
     tempDf = pd.pivot_table(originDf, index=['user_item','context_timestamp'], values=['is_trade'], aggfunc=len)
-    tempDf.columns = ['click']
+    tempDf.columns = ['show']
     tempDf.reset_index(inplace=True)
     tempDf['last_user_item'] = tempDf['user_item'].shift(1)
     tempDf['last_user_item'] = tempDf['last_user_item']==tempDf['user_item']
-    tempDf['last_click_time'] = tempDf['context_timestamp'].shift(1)
-    tempDf.loc[~tempDf.last_user_item, 'last_click_time'] = np.nan
-    tempDf['ui_last_click_timedelta'] = tempDf['context_timestamp'] - tempDf['last_click_time']
-    tempDf['ui_last_click_timedelta'] = tempDf['ui_last_click_timedelta'].dt.seconds
-    tempDf['ui_last_click_timedelta'].fillna(999999, inplace=True)
-    hourClickList = []
-    hourClickTemp = {}
-    for same, dt, click in tempDf[['last_user_item','context_timestamp','click']].values:
+    tempDf['last_show_time'] = tempDf['context_timestamp'].shift(1)
+    tempDf.loc[~tempDf.last_user_item, 'last_show_time'] = np.nan
+    tempDf['ui_last_show_timedelta'] = tempDf['context_timestamp'] - tempDf['last_show_time']
+    tempDf['ui_last_show_timedelta'] = tempDf['ui_last_show_timedelta'].dt.seconds
+    tempDf['ui_last_show_timedelta'].fillna(999999, inplace=True)
+    hourShowList = []
+    hourShowTemp = {}
+    for same, dt, show in tempDf[['last_user_item','context_timestamp','show']].values:
         if same:
-            [hourClickTemp.pop(k) for k in list(hourClickTemp) if k<dt-timedelta(hours=1)]
-            hourClickList.append(np.sum(list(hourClickTemp.values())))
-            hourClickTemp[dt] = click
+            [hourShowTemp.pop(k) for k in list(hourShowTemp) if k<dt-timedelta(hours=1)]
+            hourShowList.append(np.sum(list(hourShowTemp.values())))
+            hourShowTemp[dt] = show
         else:
-            hourClickList.append(0)
-            hourClickTemp = {dt:click}
-    tempDf['ui_lasthour_click'] = hourClickList
-    df = df.merge(tempDf[['user_item','context_timestamp','ui_last_click_timedelta','ui_lasthour_click']], how='left', on=['user_item','context_timestamp'])
+            hourShowList.append(0)
+            hourShowTemp = {dt:show}
+    tempDf['ui_lasthour_show'] = hourShowList
+    df = df.merge(tempDf[['user_item','context_timestamp','ui_last_show_timedelta','ui_lasthour_show']], how='left', on=['user_item','context_timestamp'])
+    df['ui_lasthour_show_ratio'] = df['ui_lasthour_show'] / df['user_lasthour_show']
+    df['ui_lasthour_show_ratio'].fillna(0, inplace=True)
 
     tempDf = pd.pivot_table(originDf, index=['user_item','date'], values=['is_trade'], aggfunc=[len,np.sum])
-    tempDf.columns = ['ui_lastdate_click', 'ui_lastdate_trade']
+    tempDf.columns = ['ui_lastdate_show', 'ui_lastdate_trade']
     tempDf.reset_index(inplace=True)
     tempDf['date'] = tempDf['date'] + timedelta(days=1)
-    df = df.merge(tempDf[['user_item','date','ui_lastdate_click', 'ui_lastdate_trade']], how='left', on=['user_item','date'])
-    df.fillna({k:0 for k in ['ui_lastdate_click', 'ui_lastdate_trade']}, inplace=True)
+    df = df.merge(tempDf[['user_item','date','ui_lastdate_show', 'ui_lastdate_trade']], how='left', on=['user_item','date'])
+    df.fillna({k:0 for k in ['ui_lastdate_show', 'ui_lastdate_trade']}, inplace=True)
     return df
 
-# 统计用户各价格段的浏览特征
+# 统计用户该价格段商品的统计特征
 def addUserPriceFea(df, hisDf=None):
     if isinstance(hisDf, pd.DataFrame):
-        df['is_trade'] = 0
-        tempDf = pd.concat([hisDf,df], ignore_index=True)
+        originDf = pd.concat([hisDf,df], ignore_index=True)
     else:
-        tempDf = df.copy()
-    temp = tempDf.groupby(['user_id', 'item_price_level']).size(
-        ).reset_index().rename(columns={0: 'user_price_times'})
-    df = df.merge(temp, how='left', on=['user_id', 'item_price_level'])
-    temp = tempDf.groupby(['user_id']).size(
-        ).reset_index().rename(columns={0: 'user_times'})
-    df = df.merge(temp, how='left', on=['user_id'])
-    df['user_price_ratio'] = df.user_price_times / df.user_times
+        originDf = df.copy()
+    tempDf = pd.pivot_table(originDf, index=['user_id','item_price_level','date'], values='is_trade', aggfunc=[len,np.sum])
+    tempDf.columns = ['show','trade']
+    tempDf.reset_index(inplace=True)
+    tempDf[['last_user','last_price']] = tempDf[['user_id','item_price_level']].shift(1)
+    tempDf['same'] = (tempDf['user_id']==tempDf['last_user']) & (tempDf['item_price_level']==tempDf['last_price'])
+    showList,tradeList = ([] for i in range(2))
+    showTemp = tradeTemp = 0
+    for same,show,trade in tempDf[['same','show','trade']].values:
+        showList.append(showTemp if same else 0)
+        tradeList.append(tradeTemp if same else 0)
+        showTemp = showTemp+show if same else show
+        tradeTemp = tradeTemp+trade if same else trade
+    tempDf['up_his_show'] = showList
+    tempDf['up_his_trade'] = tradeList
+    df = df.merge(tempDf[['user_id','item_price_level','date','up_his_show','up_his_trade']], how='left', on=['user_id','item_price_level','date'])
+    df['up_his_show_ratio'] = df['up_his_show'] / df['user_his_show']
+    df.fillna({k:0 for k in ['up_his_show','up_his_trade','up_his_show_ratio']}, inplace=True)
     return df
 
 # 添加广告商品与查询词的相关性特征
@@ -307,6 +339,7 @@ class XgbModel:
         self.clf = None
 
     def train(self, X, y, train_size=1, test_size=0.1, verbose=True, num_boost_round=1000, early_stopping_rounds=3):
+        X = X.astype(float)
         if train_size==1:
             X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size)
             X_train, y_train = X, y
@@ -325,6 +358,7 @@ class XgbModel:
         self.clf = clf
 
     def trainCV(self, X, y, nFold=3, verbose=True, num_boost_round=1500, early_stopping_rounds=10):
+        X = X.astype(float)
         dtrain = xgb.DMatrix(X, label=y, feature_names=self.feaNames)
         cvResult = xgb.cv(
             self.params, dtrain, 
@@ -377,6 +411,7 @@ class XgbModel:
         exit()
 
     def predict(self, X):
+        X = X.astype(float)
         return self.clf.predict(xgb.DMatrix(X, feature_names=self.feaNames))
 
     def getFeaScore(self, show=False):
@@ -398,9 +433,10 @@ def feaFactory(df, hisDf=None):
     df = addTimeFea(df)
     df = addUserFea(df, hisDf)
     df = addItemFea(df, hisDf)
+    df = addUserCateFea(df, hisDf)
     df = addUserItemFea(df, hisDf)
+    df = addUserPriceFea(df, hisDf)
     # df = addContextRelatedFea(df)
-    # df = addUserPriceFea(df, hisDf)
     print('finished feaFactory: ', datetime.now() - startTime)
     return df
 
@@ -426,7 +462,7 @@ def countDeltaY(predictSeries, labelSeries, show=True, title='', subplot=None):
     return deltaSeries
 
 # 获取stacking下一层数据集
-def getOof(clf, trainX, trainY, testX, nFold=10):
+def getOof(clf, trainX, trainY, testX, nFold=5):
     oofTrain = np.zeros(trainX.shape[0])
     oofTest = np.zeros(testX.shape[0])
     oofTestSkf = np.zeros((testX.shape[0], nFold))
@@ -437,8 +473,8 @@ def getOof(clf, trainX, trainY, testX, nFold=10):
         kfTestX = trainX[testIdx]
         clf.trainCV(kfTrainX, kfTrainY, verbose=False)
         oofTrain[testIdx] = clf.predict(kfTestX)
-    clf.trainCV(trainX,trainY, verbose=False)
-    oofTest = clf.predict(testX)
+        oofTestSkf[:,i] = clf.predict(testX)
+    oofTest[:] = oofTestSkf.mean(axis=1)
     return oofTrain, oofTest
 
 
@@ -450,34 +486,39 @@ if __name__ == '__main__':
     df = feaFactory(df)
 
     # 特征筛选
-    # tempCol = ['item_his_click','item_his_trade','item_his_trade_ratio','item_last_click_timedelta','item_lasthour_click']
-    # resultDf = getFeaScore(df[tempCol].values, df['is_trade'].values, tempCol)
-    # print(resultDf[resultDf.scores>10])
+    tempCol = ['uc_last_show_timedelta','uc_lasthour_show','uc_lastdate_show','uc_lastdate_trade','ui_last_show_timedelta','ui_lasthour_show','ui_lastdate_show','ui_lastdate_trade','ui_lasthour_show_ratio']
+    resultDf = getFeaScore(df[tempCol].values, df['is_trade'].values, tempCol)
+    print(resultDf[resultDf.scores>0])
     fea = [
         'item_category1','item_category2','item_city_id', 'item_sales_level','item_collected_level','item_price_level',#'item_id',
         'user_gender_id','user_age_level','user_star_level',#'user_id',
-        'hour2','hour','context_page_id',
+        'hour','context_page_id',#'hour2',
         'shop_review_positive_rate','shop_score_service','shop_score_delivery','shop_score_description',#'shop_id',
-        'user_his_click', 'user_his_trade','user_his_trade_ratio','user_last_click_timedelta','user_lasthour_click',
-        'item_his_click','item_his_trade','item_his_trade_ratio',#'item_lasthour_click','item_last_click_timedelta',
-        'ui_last_click_timedelta','ui_lasthour_click','ui_lastdate_click','ui_lastdate_trade',
-        # 'user_cate_query_day','user_cate_query_day_hour'
+        'user_his_show', 'user_his_trade','user_his_trade_ratio','user_last_show_timedelta','user_lasthour_show',
+        'item_his_show','item_his_trade','item_his_trade_ratio',#'item_lasthour_show'
+        'ui_last_show_timedelta','ui_lastdate_show','ui_lastdate_trade','ui_lasthour_show_ratio','ui_lasthour_show',
+        'uc_last_show_timedelta','uc_lastdate_trade','uc_lasthour_show',#'uc_lastdate_show',
+        # 'up_his_show',#'up_his_show_ratio','up_his_trade',
     ]
+    print(df[fea].info())
     # exit()
 
     # 测试模型效果
-    costDf = pd.DataFrame(index=fea+['cost'])
+    costDf = pd.DataFrame(index=fea+['cost','oof_cost'])
     xgbModel = XgbModel(feaNames=fea)
     for dt in pd.date_range(start='2018-09-21', end='2018-09-23', freq='D'):
         trainDf, testDf = trainTestSplit(df, dt, trainPeriod=7)
         # xgbModel.gridSearch(trainDf[fea].values, trainDf['is_trade'].values)
         xgbModel.trainCV(trainDf[fea].values, trainDf['is_trade'].values)
         testDf.loc[:,'predict'] = xgbModel.predict(testDf[fea].values)
+        # _,testDf.loc[:,'oof_predict'] = getOof(xgbModel, trainDf[fea].values, trainDf['is_trade'].values, testDf[fea].values)
         scoreDf = xgbModel.getFeaScore()
         scoreDf.columns = [dt.strftime('%Y-%m-%d')]
         costDf = costDf.merge(scoreDf, how='left', left_index=True, right_index=True)
         cost = metrics.log_loss(testDf['is_trade'].values, testDf['predict'].values)
         costDf.loc['cost',dt.strftime('%Y-%m-%d')] = cost
+        # cost = metrics.log_loss(testDf['is_trade'].values, testDf['oof_predict'].values)
+        # costDf.loc['oof_cost',dt.strftime('%Y-%m-%d')] = cost
     print(costDf)
     exit()
 
@@ -503,3 +544,10 @@ if __name__ == '__main__':
     print("预测结果：\n",predictDf[['instance_id','predicted_score']].head())
     # exportResult(predictDf, "%s_predict.csv" % modelName)
     exportResult(predictDf[['instance_id','predicted_score']], "%s.txt" % modelName)
+
+    # 生成stacking数据集
+    df['predicted_score'] = np.nan
+    predictDf['predicted_score'] = np.nan
+    df.loc[:,'predicted_score'], predictDf.loc[:,'predicted_score'] = getOof(xgbModel, df[fea].values, df['is_trade'].values, predictDf[fea].values)
+    exportResult(df[['instance_id','predicted_score']], "%s_oof_train.csv" % modelName)
+    exportResult(predictDf[['instance_id','predicted_score']], "%s_oof_test.csv" % modelName)
