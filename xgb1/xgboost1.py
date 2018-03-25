@@ -18,11 +18,12 @@
         'nfold': 3
 特征： 商品一级类目，商品二级类目，商品城市id，商品销量等级，商品收藏量等级，商品价格等级
       用户性别编号/用户年龄段/用户星级等级
-      小时数，2倍小时数，展示页码编号
+      小时数，展示页码编号
       店铺好评率/店铺服务评分/店铺物流评分/店铺描述评分
       用户历史点击数（当天以前），用户历史交易数（当天以前），用户历史转化率（当天以前），用户距离上次点击时长（秒），用户过去一小时点击数
       商品历史点击数（当天以前），商品历史交易数（当天以前），商品历史转化率（当天以前）
-      用户距离上次浏览该商品的时长，用户过去一小时浏览该商品的次数，用户前一天浏览该商品的次数，用户前一天购买该商品的次数
+      用户距离上次浏览该商品的时长，用户过去一小时浏览该商品的次数，用户过去一小时浏览该商品的次数占同类商品的比重
+      用户距离上次浏览该商品类别的市场，用户过去一小时浏览该类别的次数
 结果： A榜（0.08168）
 
 '''
@@ -66,15 +67,6 @@ def scalerFea(df, cols):
     df[cols] = scaler.fit_transform(df[cols].values)
     return df,scaler
 
-# 转化数据集字段格式，并去重
-def formatDf(df):
-    # strCols = ['instance_id','item_id','user_id','context_id','shop_id','item_brand_id','item_city_id','user_gender_id','user_occupation_id']
-    # df[strCols] = df[strCols].astype('str')
-    df = df.applymap(lambda x: np.nan if (x==-1)|(x=='-1') else x)
-    df.drop_duplicates(inplace=True)
-    df['context_timestamp'] = pd.to_datetime(df.context_timestamp, unit='s')
-    return df
-
 # 计算单特征与标签的F值
 def getFeaScore(X, y, feaNames):
     resultDf = pd.DataFrame(index=feaNames)
@@ -82,6 +74,31 @@ def getFeaScore(X, y, feaNames):
     resultDf['scores'] = selecter.scores_
     resultDf['p_values'] = selecter.pvalues_
     return resultDf
+
+# 矩估计法计算贝叶斯平滑参数
+def countBetaParamByMME(inputArr):
+    EX = inputArr.mean()
+    EX2 = (inputArr ** 2).mean()
+    alpha = (EX*(EX-EX2)) / (EX2 - EX**2)
+    beta = alpha * (1/EX - 1)
+    return alpha,beta
+
+# 对numpy数组进行贝叶斯平滑处理
+def biasSmooth(aArr, bArr, method='MME', alpha=None, beta=None):
+    ratioArr = aArr / bArr
+    if method=='MME':
+        alpha,beta = countBetaParamByMME(ratioArr[ratioArr==ratioArr])
+        # print(alpha,beta)
+    resultArr = (aArr+alpha) / (bArr+alpha+beta)
+
+    return resultArr
+
+# 转化数据集字段格式，并去重
+def formatDf(df):
+    df = df.applymap(lambda x: np.nan if (x==-1)|(x=='-1') else x)
+    df.drop_duplicates(inplace=True)
+    df['context_timestamp'] = pd.to_datetime(df.context_timestamp, unit='s')
+    return df
 
 # 拆分多维度拼接的字段
 def splitMultiFea(df):
@@ -131,7 +148,8 @@ def addItemFea(df, hisDf=None):
         tradeTemp = tradeTemp+t if same else t
     tempDf['item_his_show'] = showList
     tempDf['item_his_trade'] = tradeList
-    tempDf['item_his_trade_ratio'] = tempDf['item_his_trade'] / tempDf['item_his_show']
+    # tempDf['item_his_trade_ratio'] = tempDf['item_his_trade'] / tempDf['item_his_show']
+    tempDf['item_his_trade_ratio'] = biasSmooth(tempDf.item_his_trade.values, tempDf.item_his_show.values)
     df = df.merge(tempDf[['item_id','date','item_his_show','item_his_trade','item_his_trade_ratio']], how='left', on=['item_id','date'])
     df['item_his_trade_ratio'].fillna(0, inplace=True)
 
@@ -164,7 +182,8 @@ def addUserFea(df, hisDf=None):
         tradeTemp = tradeTemp+trade if same else trade
     tempDf['user_his_show'] = showList
     tempDf['user_his_trade'] = tradeList
-    tempDf['user_his_trade_ratio'] = tempDf.user_his_trade / tempDf.user_his_show
+    tempDf['user_his_trade_ratio'] = biasSmooth(tempDf.user_his_trade.values, tempDf.user_his_show.values)
+    # tempDf['user_his_trade_ratio'] = tempDf.user_his_trade / tempDf.user_his_show
     df = df.merge(tempDf[['user_id','date','user_his_show', 'user_his_trade','user_his_trade_ratio']], how='left', on=['user_id','date'])
     df['user_his_trade_ratio'].fillna(0, inplace=True)
 
@@ -258,6 +277,7 @@ def addUserItemFea(df, hisDf=None):
     df = df.merge(tempDf[['user_item','context_timestamp','ui_last_show_timedelta','ui_lasthour_show']], how='left', on=['user_item','context_timestamp'])
     df['ui_lasthour_show_ratio'] = df['ui_lasthour_show'] / df['user_lasthour_show']
     df['ui_lasthour_show_ratio'].fillna(0, inplace=True)
+    # df['ui_lasthour_show_ratio'] = biasSmooth(df.ui_lasthour_show.values, df.user_lasthour_show.values)
 
     tempDf = pd.pivot_table(originDf, index=['user_item','date'], values=['is_trade'], aggfunc=[len,np.sum])
     tempDf.columns = ['ui_lastdate_show', 'ui_lastdate_trade']
@@ -289,6 +309,7 @@ def addUserPriceFea(df, hisDf=None):
     tempDf['up_his_trade'] = tradeList
     df = df.merge(tempDf[['user_id','item_price_level','date','up_his_show','up_his_trade']], how='left', on=['user_id','item_price_level','date'])
     df['up_his_show_ratio'] = df['up_his_show'] / df['user_his_show']
+    # df['up_his_show_ratio'] = biasSmooth(df.up_his_show.values, df.user_his_show.values)
     df.fillna({k:0 for k in ['up_his_show','up_his_trade','up_his_show_ratio']}, inplace=True)
     return df
 
@@ -494,11 +515,11 @@ if __name__ == '__main__':
         'user_gender_id','user_age_level','user_star_level',#'user_id',
         'hour','context_page_id',#'hour2',
         'shop_review_positive_rate','shop_score_service','shop_score_delivery','shop_score_description',#'shop_id',
-        'user_his_show', 'user_his_trade','user_his_trade_ratio','user_last_show_timedelta','user_lasthour_show',
-        'item_his_show','item_his_trade','item_his_trade_ratio',#'item_lasthour_show'
-        'ui_last_show_timedelta','ui_lastdate_show','ui_lastdate_trade','ui_lasthour_show_ratio','ui_lasthour_show',
-        'uc_last_show_timedelta','uc_lastdate_trade','uc_lasthour_show',#'uc_lastdate_show',
-        # 'up_his_show',#'up_his_show_ratio','up_his_trade',
+        'user_his_show','user_his_trade_ratio','user_last_show_timedelta','user_lasthour_show','user_his_trade',
+        'item_his_show','item_his_trade_ratio','item_his_trade',
+        'ui_last_show_timedelta','ui_lasthour_show_ratio','ui_lasthour_show',#'ui_lastdate_show','ui_lastdate_trade',
+        'uc_last_show_timedelta','uc_lasthour_show',#'uc_lastdate_show','uc_lastdate_trade',
+        # 'up_his_show_ratio',# 'up_his_show','up_his_trade',
     ]
     print(df[fea].info())
     # exit()
