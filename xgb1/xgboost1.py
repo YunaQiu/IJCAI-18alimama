@@ -19,13 +19,13 @@
 特征： 商品一级类目，商品二级类目，商品城市id，商品销量等级，商品收藏量等级，商品价格等级
       用户性别编号/用户年龄段/用户星级等级
       小时数，展示页码编号
-      店铺好评率/店铺服务评分/店铺物流评分/店铺描述评分
+      店铺好评率/店铺服务评分/店铺物流评分/店铺描述评分/店铺历史点击数/店铺历史交易数/店铺历史交易率/店铺好评率与同行平均差值/店铺服务评分与同行平均差值/店铺物流评分与同行平均差值/店铺描述评分与同行平均差值
       用户历史点击数（当天以前），用户历史交易数（当天以前），用户历史转化率（当天以前），用户距离上次点击时长（秒），用户过去一小时点击数
-      商品历史点击数（当天以前），商品历史交易数（当天以前），商品历史转化率（当天以前），商品在同类商品中的历史点击率，商品价格等级与同类均值之差
+      商品历史点击数（当天以前），商品历史交易数（当天以前），商品历史转化率（当天以前），商品在同类商品中的历史点击率，商品价格等级与同类均值之差，商品销售等级与同类均值之差
       用户距离上次浏览该商品的时长，用户过去一小时浏览该商品的次数，用户过去一小时浏览该商品的次数占同类商品的比重
-      用户距离上次浏览该商品类别的时长，用户过去一小时浏览该类别的次数，用户在该类别的历史点击数，用户在该类别的历史交易数，用户在该类别的里是转化率
+      用户距离上次浏览该商品类别的时长，用户过去一小时浏览该类别的次数，用户在该类别的历史点击数，用户在该类别的历史交易数，用户在该类别的历史转化率
       用户浏览该价位的次数占用户浏览记录的比重
-结果： A榜（0.08137）
+结果： A榜（0.08157）
 
 '''
 
@@ -154,6 +154,44 @@ def addCateFea(df, hisDf=None):
     return df
 
 # 添加商品历史浏览量及购买量特征
+def addShopFea(df, hisDf=None):
+    if isinstance(hisDf, pd.DataFrame):
+        originDf = pd.concat([hisDf,df],ignore_index=True)
+    else:
+        originDf = df.copy()
+    tempDf = pd.pivot_table(originDf, index=['shop_id','date'], values='is_trade', aggfunc=[len, sum])
+    tempDf.columns = ['show','trade']
+    tempDf.reset_index(inplace=True)
+    tempDf['same_shop'] = tempDf['shop_id'].shift(1)
+    tempDf['same_shop'] = tempDf['shop_id'] == tempDf['same_shop']
+    showList = []
+    tradeList = []
+    showTemp = tradeTemp = 0
+    for same,c,t in tempDf[['same_shop','show','trade']].values:
+        showList.append(showTemp if same else 0)
+        tradeList.append(tradeTemp if same else 0)
+        showTemp = showTemp+c if same else c
+        tradeTemp = tradeTemp+t if same else t
+    tempDf['shop_his_show'] = showList
+    tempDf['shop_his_trade'] = tradeList
+    tempDf['shop_his_trade_ratio'] = biasSmooth(tempDf.shop_his_trade.values, tempDf.shop_his_show.values)
+    df = df.merge(tempDf[['shop_id','date','shop_his_show','shop_his_trade','shop_his_trade_ratio']], how='left', on=['shop_id','date'])
+    df['shop_his_trade_ratio'].fillna(0, inplace=True)
+    df['shop_his_show_ratio'] = biasSmooth(df.shop_his_show.values, df.cate_his_show.values)
+    df['shop_catetrade_ratio_delta'] = df['shop_his_trade_ratio'] - df['cate_his_trade_ratio']
+
+    shopDf = originDf.drop_duplicates(['item_category1','shop_id'])
+    tempDf = pd.pivot_table(shopDf, index=['item_category1'], values=['shop_review_positive_rate','shop_score_service','shop_score_delivery','shop_score_description'], aggfunc=np.mean)
+    tempDf.columns = ['shop_review_positive_mean','shop_score_delivery_mean','shop_score_description_mean','shop_score_service_mean']
+    tempDf.reset_index(inplace=True)
+    df = df.merge(tempDf, how='left', on='item_category1')
+    df['shop_review_positive_delta'] = df['shop_review_positive_rate'] - df['shop_review_positive_mean']
+    df['shop_score_service_delta'] = df['shop_score_service'] - df['shop_score_service_mean']
+    df['shop_score_delivery_delta'] = df['shop_score_delivery'] - df['shop_score_delivery_mean']
+    df['shop_score_description_delta'] = df['shop_score_description'] - df['shop_score_description_mean']
+    return df
+
+# 添加商品历史浏览量及购买量特征
 def addItemFea(df, hisDf=None):
     if isinstance(hisDf, pd.DataFrame):
         originDf = pd.concat([hisDf,df],ignore_index=True)
@@ -187,7 +225,6 @@ def addItemFea(df, hisDf=None):
     df = df.merge(tempDf, how='left', on='item_category1')
     df['item_cateprice_delta'] = df['item_price_level'] - df['cate_price_mean']
     df['item_catesales_delta'] = df['item_sales_level'] - df['cate_sales_mean']
-    print(df['item_catesales_delta'].describe())
     return df
 
 # 添加用户维度特征
@@ -490,6 +527,7 @@ def feaFactory(df, hisDf=None):
     df = addTimeFea(df)
     df = addCateFea(df, hisDf)
     df = addUserFea(df, hisDf)
+    df = addShopFea(df, hisDf)
     df = addItemFea(df, hisDf)
     df = addUserCateFea(df, hisDf)
     df = addUserItemFea(df, hisDf)
@@ -544,17 +582,17 @@ if __name__ == '__main__':
     df = feaFactory(df)
 
     # 特征筛选
-    tempCol = ['up_his_show_ratio','up_his_show','up_his_trade','item_catetrade_ratio_delta','item_cateprice_delta','item_catesales_delta']
-    resultDf = getFeaScore(df.dropna(subset=['item_catesales_delta'])[tempCol].values, df.dropna(subset=['item_catesales_delta'])['is_trade'].values, tempCol)
+    tempCol = ['shop_his_show','shop_his_trade','shop_his_trade_ratio','shop_review_positive_delta','shop_score_service_delta','shop_score_delivery_delta','shop_score_description_delta']
+    resultDf = getFeaScore(df.dropna(subset=tempCol)[tempCol].values, df.dropna(subset=tempCol)['is_trade'].values, tempCol)
     print(resultDf[resultDf.scores>0])
     fea = [
         'item_category1','item_category2','item_city_id', 'item_sales_level','item_collected_level','item_price_level',#'item_id',
         'user_gender_id','user_age_level','user_star_level',#'user_id',
         'hour','context_page_id',#'hour2',
-        'shop_review_positive_rate','shop_score_service','shop_score_delivery','shop_score_description',#'shop_id',
+        'shop_review_positive_rate','shop_score_service','shop_score_delivery','shop_score_description','shop_his_show','shop_his_trade','shop_his_trade_ratio','shop_score_service_delta','shop_score_delivery_delta','shop_score_description_delta','shop_review_positive_delta',#'shop_id',
         #'cate_his_trade_ratio',#'cate_his_show','cate_his_trade',
         'user_his_show','user_his_trade_ratio','user_last_show_timedelta','user_lasthour_show','user_his_trade',
-        'item_his_show','item_his_trade_ratio','item_his_show_ratio','item_his_trade','item_cateprice_delta',#'item_catesales_delta',#'item_catetrade_ratio_delta',
+        'item_his_show','item_his_trade','item_his_trade_ratio','item_his_show_ratio','item_catesales_delta','item_cateprice_delta',#'item_catetrade_ratio_delta',
         'ui_last_show_timedelta','ui_lasthour_show_ratio','ui_lasthour_show',#'ui_lastdate_show','ui_lastdate_trade',
         'uc_last_show_timedelta','uc_lasthour_show','uc_his_show', 'uc_his_trade','uc_his_trade_ratio',
         'up_his_show_ratio',#'up_his_show',#'up_his_trade',
