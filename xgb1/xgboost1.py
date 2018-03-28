@@ -108,6 +108,7 @@ def splitMultiFea(df):
     tempDf['item_category0'] = tempDf[tempDf.item_category_list.notnull()]['item_category_list'].map(lambda x: x[0])
     tempDf['item_category1'] = tempDf[tempDf.item_category_list.notnull()]['item_category_list'].map(lambda x: x[1] if len(x)>1 else np.nan)
     tempDf['item_category2'] = tempDf[tempDf.item_category_list.notnull()]['item_category_list'].map(lambda x: x[2] if len(x)>2 else np.nan)
+    tempDf.loc[tempDf.item_category2.notnull(), 'item_category1'] = tempDf.loc[tempDf.item_category2.notnull(), 'item_category2']
     tempDf['item_property_list'] = tempDf[tempDf.item_property_list.notnull()]['item_property_list'].map(lambda x: x.split(';'))
     df = df.drop(['item_category_list','item_property_list'], axis=1).merge(tempDf, how='left', on='item_id')
     df['predict_category_property'] = df[df.predict_category_property.notnull()]['predict_category_property'].map(
@@ -421,12 +422,13 @@ class XgbModel:
             'silent': True,
             'eta': 0.1,
             'max_depth': 4,
-            'gamma': 0.01,
-            'subsample': 0.7,
-            'colsample_bytree': 0.75,
+            'gamma': 0.5,
+            'subsample': 0.8,
+            'colsample_bytree': 0.8,
             'min_child_weight': 8,
             'max_delta_step': 2,
-            # 'alpha':1600
+            # 'alpha':1600,
+            'lambda': 100,
         }
         for k,v in params.items():
             self.params[k] = v
@@ -470,12 +472,13 @@ class XgbModel:
     def gridSearch(self, X, y, nFold=3, verbose=1, num_boost_round=120):
         paramsGrids = {
             # 'n_estimators': [50+5*i for i in range(0,30)],
-            # 'gamma': [0+10*i for i in range(0,10)],
+            # 'gamma': [0+0.5*i for i in range(0,10)],
             # 'max_depth': list(range(3,10)),
             # 'min_child_weight': list(range(1,10)),
             # 'subsample': [1-0.05*i for i in range(0,8)],
-            'colsample_bytree': [1-0.05*i for i in range(0,10)],
-            # 'reg_alpha':[1000+100*i for i in range(0,20)]
+            # 'colsample_bytree': [1-0.05*i for i in range(0,10)],
+            # 'reg_alpha': [0+2*i for i in range(0,10)],
+            'reg_lambda': [0+10**i for i in range(0,4)],            
             # 'max_delta_step': [0+1*i for i in range(0,8)],
         }
         for k,v in paramsGrids.items():
@@ -586,14 +589,14 @@ if __name__ == '__main__':
     resultDf = getFeaScore(df.dropna(subset=tempCol)[tempCol].values, df.dropna(subset=tempCol)['is_trade'].values, tempCol)
     print(resultDf[resultDf.scores>0])
     fea = [
-        'item_category1','item_category2','item_city_id', 'item_sales_level','item_collected_level','item_price_level',#'item_id',
+        'item_category1','item_city_id', 'item_sales_level','item_collected_level','item_price_level',#'item_id','item_category2',
         'user_gender_id','user_age_level','user_star_level',#'user_id',
         'hour','context_page_id',#'hour2',
         'shop_review_positive_rate','shop_score_service','shop_score_delivery','shop_score_description','shop_his_show','shop_his_trade','shop_his_trade_ratio','shop_score_service_delta','shop_score_delivery_delta','shop_score_description_delta','shop_review_positive_delta',#'shop_id',
         #'cate_his_trade_ratio',#'cate_his_show','cate_his_trade',
-        'user_his_show','user_his_trade_ratio','user_last_show_timedelta','user_lasthour_show','user_his_trade',
+        'user_his_show','user_his_trade_ratio','user_last_show_timedelta',#'user_lasthour_show','user_his_trade',
         'item_his_show','item_his_trade','item_his_trade_ratio','item_his_show_ratio','item_catesales_delta','item_cateprice_delta',#'item_catetrade_ratio_delta',
-        'ui_last_show_timedelta','ui_lasthour_show_ratio','ui_lasthour_show',#'ui_lastdate_show','ui_lastdate_trade',
+        'ui_last_show_timedelta','ui_lasthour_show_ratio',#'ui_lasthour_show',#'ui_lastdate_show','ui_lastdate_trade',
         'uc_last_show_timedelta','uc_lasthour_show','uc_his_show', 'uc_his_trade','uc_his_trade_ratio',
         'up_his_show_ratio',#'up_his_show',#'up_his_trade',
     ]
@@ -608,16 +611,16 @@ if __name__ == '__main__':
         # xgbModel.gridSearch(trainDf[fea].values, trainDf['is_trade'].values)
         xgbModel.trainCV(trainDf[fea].values, trainDf['is_trade'].values)
         testDf.loc[:,'predict'] = xgbModel.predict(testDf[fea].values)
-        # _,testDf.loc[:,'oof_predict'] = getOof(xgbModel, trainDf[fea].values, trainDf['is_trade'].values, testDf[fea].values)
+        _,testDf.loc[:,'oof_predict'] = getOof(xgbModel, trainDf[fea].values, trainDf['is_trade'].values, testDf[fea].values)
         scoreDf = xgbModel.getFeaScore()
         scoreDf.columns = [dt.strftime('%Y-%m-%d')]
         costDf = costDf.merge(scoreDf, how='left', left_index=True, right_index=True)
         cost = metrics.log_loss(testDf['is_trade'].values, testDf['predict'].values)
         costDf.loc['cost',dt.strftime('%Y-%m-%d')] = cost
-        # cost = metrics.log_loss(testDf['is_trade'].values, testDf['oof_predict'].values)
-        # costDf.loc['oof_cost',dt.strftime('%Y-%m-%d')] = cost
+        cost = metrics.log_loss(testDf['is_trade'].values, testDf['oof_predict'].values)
+        costDf.loc['oof_cost',dt.strftime('%Y-%m-%d')] = cost
     print(costDf)
-    exit()
+    # exit()
 
     # 正式模型
     modelName = "xgboost1A"
