@@ -6,7 +6,7 @@
 模型参数：-s 4
         -l 0.00002
         -r 0.02
-        -t 29
+        -t 70（最大迭代次数）
         -k field数目减1
 数值特征：商品销量等级，商品收藏等级，
         店铺历史交易率
@@ -19,8 +19,9 @@
         用户id，用户性别类型，用户年龄等级，用户星级
         店铺id，店铺评论量等级，店铺星级
         小时数，广告展示页面编号
-特殊处理: 测试模型效果时用23号前做训练集，23号当天做测试集，并记录迭代次数。正式模型使用全部数据做训练集，迭代次数设为测试模型的迭代次数
-结果： A榜（0.08271）
+特殊处理: 训练模型时先划分80%训练集和20%的验证集，迭代固定次数后，取验证集误差最小的迭代次数N，然后再将所有数据作为训练集迭代N次
+        正式模型时重复训练3次，得到3个模型再将结果平均
+结果： A榜（0.08192）
 
 '''
 
@@ -40,7 +41,7 @@ import subprocess
 from sklearn.preprocessing import *
 from sklearn import metrics
 from sklearn.feature_selection import SelectKBest, f_classif
-from sklearn.model_selection import train_test_split, KFold, GridSearchCV
+from sklearn.model_selection import train_test_split, KFold, GridSearchCV, StratifiedKFold
 from sklearn.externals import joblib
 
 # 导入数据
@@ -436,9 +437,9 @@ def feaFactory(df, hisDf=None):
 
 # 划分训练集和测试集
 def trainTestSplit(df, splitDate=pd.to_datetime('2018-09-23'), trainPeriod=3, testPeriod=1):
-    trainDf = df[(df.context_timestamp<splitDate)&(df.context_timestamp>=splitDate-timedelta(days=trainPeriod))]
-    testDf = df[(df.context_timestamp>=splitDate)&(df.context_timestamp<splitDate+timedelta(days=testPeriod))]
-    return (trainDf, testDf)
+    trainIdx = df[(df.context_timestamp<splitDate)&(df.context_timestamp>=splitDate-timedelta(days=trainPeriod))].index
+    testIdx = df[(df.context_timestamp>=splitDate)&(df.context_timestamp<splitDate+timedelta(days=testPeriod))].index
+    return (trainIdx, testIdx)
 
 # 导出预测结果
 def exportResult(df, fileName, header=True, index=False, sep=' '):
@@ -454,36 +455,50 @@ def getOof(clf, trainX, trainY, testX, nFold=5):
         kfTrainX = trainX[trainIdx]
         kfTrainY = trainY[trainIdx]
         kfTestX = trainX[testIdx]
-        clf.trainCV(kfTrainX, kfTrainY, verbose=False)
+        clf.trainAutoIter(kfTrainX, kfTrainY, verbose=False)
         oofTrain[testIdx] = clf.predict(kfTestX)
         oofTestSkf[:,i] = clf.predict(testX)
     oofTest[:] = oofTestSkf.mean(axis=1)
     return oofTrain, oofTest
 
 class LibFFM():
-    def __init__(self, df, numFea, strFea, labelName):
-        # ffmDf, scaler = scalerFea(df.copy(), numFea)
+    def __init__(self, df, numFea, strFea, labelName, multiFea=[]):
         ffmDf, scaler = scalerFea(df.fillna({k:0 for k in numFea}), numFea)
-        fieldDict,feaNo = self.getOnehotFeaDict(ffmDf, strFea, startCount=len(numFea))
-        # self.df = ffmDf
-        # self.originDf = df
+        onehotEncoders,feaNo = self.getOnehotFeaDict(ffmDf, strFea, startCount=len(numFea))
+        if len(multiFea)>0:
+            mulChoiceEncoders, feaNo = self.getMulChoiceFeaDict(ffmDf, multiFea, startCount=feaNo)
+        else:
+            mulChoiceEncoders = None
         self.label = labelName
         self.strFea = strFea
         self.numFea = numFea
         self.scaler = scaler
-        self.fieldDict = fieldDict
-        self.fieldNum = len(numFea) + len(strFea)
+        self.onehotEncoders = onehotEncoders
+        self.mulChoiceEncoders = mulChoiceEncoders
+        self.fieldNum = len(numFea) + len(strFea) + len(multiFea)
         self.feaNum = feaNo
 
     # 获取onehot字段的特征值编码字典
     def getOnehotFeaDict(self, df, fea, startCount=0):
         feaCount = startCount
-        fieldDict = {k:dict() for k in fea}
+        onehotEncoders = {k:dict() for k in fea}
         for f in fea:
             values = set(df[f].dropna().values)
-            fieldDict[f] = {v:i+feaCount for i,v in enumerate(values)}
+            onehotEncoders[f] = {v:i+feaCount for i,v in enumerate(values)}
             feaCount += len(values)
-        return fieldDict,feaCount
+        return onehotEncoders,feaCount
+
+    # 获取onehot字段的特征值编码字典
+    def getMulChoiceFeaDict(self, df, fea, startCount=0):
+        feaCount = startCount
+        mulChoiceEncoders = {k:dict() for k in fea}
+        for f in fea:
+            values = []
+            [values.extend(x) for x in df[f].dropna().values]
+            values = set(values)
+            mulChoiceEncoders[f] = {v:i+feaCount for i,v in enumerate(values)}
+            feaCount += len(values)
+        return mulChoiceEncoders,feaCount
 
     # 获取ffm数据集
     def getFFMDf(self, df):
@@ -491,21 +506,19 @@ class LibFFM():
         numFea = self.numFea
         if self.label not in df.columns:
             ffmDf = df[numFea + strFea]
-            # ffmDf[self.label] = 0
         else:
             ffmDf = df[[self.label] + numFea + strFea]
 
         ffmDf.fillna({k:0 for k in numFea}, inplace=True)
         ffmDf.loc[:,numFea] = self.scaler.transform(ffmDf[numFea].values)
-        for f in strFea:
-            fieldDict = self.fieldDict[f]
-            ffmDf.loc[:,f] = list(map(lambda x: fieldDict[x] if x==x else x, ffmDf[f]))
 
         for i,fea in enumerate(numFea):
             ffmDf.loc[:,fea] = list(map(lambda x: '%d:%d:%f'%(i,i,x) if x==x else None, ffmDf[fea]))
         offset = len(numFea)
         for i,fea in enumerate(strFea):
-            ffmDf.loc[:,fea] = list(map(lambda x: '%d:%d:%d'%(i+offset,x,1) if x==x else None, ffmDf[fea]))
+            fieldId = i+offset
+            onehotEncoder = self.onehotEncoders[fea]
+            ffmDf.loc[:,fea] = list(map(lambda x: '%d:%d:%d'%(fieldId,onehotEncoder[x],1) if x==x else None, ffmDf[fea]))
         return ffmDf
 
     # 以ffm格式导出数据集
@@ -518,22 +531,56 @@ class LibFFM():
         return result[0].values
 
     # 调用ffm程序训练模型
-    def train(self, trainDf, testDf=None, thread=4, l2=0.00002, eta=0.02, iter_num=100, factor=None, modelName='ffm_model_temp', trainFileName='ffm_train_temp.ffm', testFileName='ffm_valid_temp.ffm'):
+    def train(self, train, test=None, thread=4, l2=0.00002, eta=0.02, iter_num=100, factor=None, modelName='ffm_model_temp', trainFileName='ffm_train_temp.ffm', testFileName='ffm_valid_temp.ffm', autoStop=True):
         factor = self.fieldNum-1 if factor==None else factor
-        self.exportFFMDf(trainDf, trainFileName)
-        autoStop = isinstance(testDf, pd.DataFrame)
-        self.exportFFMDf(testDf, testFileName) if autoStop else None
+        hasTest = isinstance(test, np.ndarray)
+        autoStop = hasTest&autoStop
+        self.exportFFMDf(pd.DataFrame(train), trainFileName)
+        self.exportFFMDf(pd.DataFrame(test), testFileName) if hasTest else None
         cmd = ['libffm/ffm-train','-s', str(thread),'-l',str(l2),'-r',str(eta),'-t',str(iter_num),'-k',str(factor)]
-        if autoStop:
-            cmd.extend(['-p',testFileName,'--auto-stop'])
+        if hasTest:
+            cmd.extend(['-p',testFileName])
+            if autoStop:
+                cmd.extend(['--auto-stop'])
         cmd.extend([trainFileName,'%s.model'%modelName])
         result = subprocess.check_output(cmd)
+        print(result.decode())
         if autoStop:
             iterNum, trainLoss, testLoss = re.findall(r"\n\s+(\d+)\s+([\d.]+)\s+([\d.]+)\nAuto-stop", result.decode(), re.S)[0]
             return int(iterNum), float(trainLoss), float(testLoss)
+        elif hasTest:
+            iterNum, trainLoss, testLoss = re.findall(r"\n\s+(\d+)\s+([\d.]+)\s+([\d.]+)\s+[\d.]+\n$", result.decode(), re.S)[0]
+            return float(trainLoss), float(testLoss)
         else:
             iterNum, trainLoss = re.findall(r"\n\s+(\d+)\s+([\d.]+)\s+[\d.]+\n$", result.decode(), re.S)[0]
-            return float(trainLoss)
+            return int(iterNum), float(trainLoss)
+
+    # 调用ffm程序训练模型
+    def trainAutoIter(self, X, y, thread=4, l2=0.00002, eta=0.02, iter_num=70, factor=None, modelName='ffm_model_temp', trainFileName='ffm_train_temp.ffm', testFileName='ffm_valid_temp.ffm', verbose=True):
+        factor = self.fieldNum-1 if factor==None else factor
+        train,test,_,_ = train_test_split(np.column_stack((y, X)), y, test_size=0.2, stratify=y)
+        self.exportFFMDf(pd.DataFrame(train), trainFileName)
+        self.exportFFMDf(pd.DataFrame(test), testFileName)
+        cmd = ['libffm/ffm-train','-s', str(thread),'-l',str(l2),'-r',str(eta),'-t',str(iter_num),'-k',str(factor),'-p',testFileName]
+        cmd.extend([trainFileName,'%s.model'%modelName])
+        # startTime = datetime.now()
+        result = subprocess.check_output(cmd)
+        # print('pretraining time:', datetime.now() - startTime)
+        lines = re.findall(r"^\s+(\d+)\s+([\d.]+)\s+([\d.]+)\s+[\d.]+$", result.decode(), re.M)
+        resultDf = pd.DataFrame(np.array(lines).astype(float), columns=['iter_num','train_loss','test_loss'])
+        resultDf['rank'] = resultDf['test_loss'].rank(method='first')
+        if verbose:
+            print(resultDf)
+        idx = resultDf[resultDf['rank']==1].index[0]
+        iterNum = resultDf.loc[idx,'iter_num']
+
+        self.exportFFMDf(pd.DataFrame(np.column_stack((y, X))), trainFileName)
+        cmd = ['libffm/ffm-train','-s', str(thread),'-l',str(l2),'-r',str(eta),'-t',str(iterNum),'-k',str(factor)]
+        cmd.extend([trainFileName,'%s.model'%modelName])
+        startTime = datetime.now()
+        result = subprocess.check_output(cmd)
+        # print('training time:', datetime.now() - startTime)
+        return iterNum
 
     # 调用ffm程序预测测试集
     def predict(self, testDf, modelName='ffm_model_temp', testFileName='ffm_test_temp.ffm', outputName='ffm_predict_temp.txt'):
@@ -544,7 +591,7 @@ class LibFFM():
         return result
 
     # 获取stacking下一层数据集
-    def getOof(self, trainDf, testDf, iterNum, nFold=5):
+    def getOof(self, trainDf, testDf, nFold=5):
         oofTrain = np.zeros(trainDf.shape[0])
         oofTest = np.zeros(testDf.shape[0])
         oofTestSkf = np.zeros((testDf.shape[0], nFold))
@@ -552,7 +599,7 @@ class LibFFM():
         for i, (trainIdx, testIdx) in enumerate(kf.split(trainDf.values)):
             kfTrainDf = trainDf.iloc[trainIdx,:]
             kfTestDf = trainDf.iloc[testIdx,:]
-            self.train(kfTrainDf, iter_num=iterNum)
+            self.trainAutoIter(kfTrainDf[numFea+strFea], kfTrainDf['is_trade'])
             oofTrain[testIdx] = self.predict(kfTestDf)
             oofTestSkf[:,i] = self.predict(testDf)
         oofTest[:] = oofTestSkf.mean(axis=1)
@@ -579,7 +626,7 @@ if __name__ == '__main__':
         'up_his_show_ratio',
     ]
     strFea = [
-        'item_category1','item_city_id','item_price_level','item_id',
+        'item_category1','item_city_id','item_price_level','item_id',#'item_brand_id','item_pv_level',
         'user_id','user_gender_id','user_age_level','user_star_level',
         'shop_id','shop_review_num_level','shop_star_level',
         'hour','context_page_id',
@@ -587,32 +634,46 @@ if __name__ == '__main__':
     print(df[numFea+strFea].info())
     # exit()
 
-    # 将数据集转成FFM模型数据集，测试模型效果
+    # 将数据集转成FFM模型数据集
     startTime = datetime.now()
     libFFM = LibFFM(pd.concat([df, predictDf],ignore_index=True), numFea, strFea, labelName='is_trade')
     print('field count:', libFFM.fieldNum)
     print('feature count:', libFFM.feaNum)
-    trainDf, testDf = trainTestSplit(df, pd.to_datetime('2018-09-23'), trainPeriod=7)
-    trainFFMDf, testFFMDf, totalFFMDf, predictFFMDf = [libFFM.getFFMDf(x) for x in [trainDf, testDf, df, predictDf]]
-    print('cost time:', datetime.now()-startTime)
-    iterNum,trainLoss,testLoss = libFFM.train(trainFFMDf, testFFMDf)
-    print('iter num:%d \t train loss:%f \t test loss:%f'%(iterNum,trainLoss,testLoss))
+    totalFFMDf, predictFFMDf = [libFFM.getFFMDf(x) for x in [df, predictDf]]
+    print('transform time:', datetime.now()-startTime)
+
+    # 测试模型效果
+    tempDf = pd.DataFrame(index=['iter','loss'])
+    for dt in pd.date_range(start='2018-09-21', end='2018-09-23', freq='D'):
+        trainIdx, testIdx = trainTestSplit(df, dt, trainPeriod=7)
+        trainDf = df.loc[trainIdx]
+        testDf = df.loc[testIdx]
+        trainFFMDf = totalFFMDf.loc[trainIdx]
+        testFFMDf = totalFFMDf.loc[testIdx]
+        iterNum = libFFM.trainAutoIter(trainFFMDf[numFea+strFea].values, trainFFMDf['is_trade'].values)
+        tempDf[dt] = [iterNum, metrics.log_loss(testDf['is_trade'].values, libFFM.predict(testFFMDf))]
+    print(tempDf)
     exit()
 
     # 正式模型训练及预测
     modelName = "ffm1A"
-    trainLoss = libFFM.train(totalFFMDf, modelName=modelName, iter_num=iterNum)
-    print('train loss:', trainLoss)
-    predictDf['predicted_score'] = libFFM.predict(predictFFMDf, modelName=modelName)
-    print(predictDf.head())
+    tempDf = pd.DataFrame(index=predictDf.index)
+    repeatTimes = 3
+    for i in range(repeatTimes):
+        iterNum = libFFM.trainAutoIter(totalFFMDf[numFea+strFea].values, totalFFMDf['is_trade'].values)
+        print('iter num:',iterNum)
+        tempDf[i] = libFFM.predict(predictFFMDf)   
+    predictDf['predicted_score'] = tempDf.mean(axis=1)
+    print(predictDf.info())
     print('predicted_score average:',predictDf['predicted_score'].mean())
     exportResult(predictDf[['instance_id','predicted_score']], "%s.txt" % modelName)
-    # exit()
+    exit()
 
     # 生成stacking数据集
     df['predicted_score'] = np.nan
     predictDf['predicted_score'] = np.nan
-    df.loc[:,'predicted_score'], predictDf.loc[:,'predicted_score'] = libFFM.getOof(totalFFMDf, predictFFMDf, iterNum=iterNum)
+    # df.loc[:,'predicted_score'], predictDf.loc[:,'predicted_score'] = getOof(libFFM, totalFFMDf[numFea+strFea].values, totalFFMDf['is_trade'].values, predictFFMDf.values)
+    df.loc[:,'predicted_score'], predictDf.loc[:,'predicted_score'] = libFFM.getOof(totalFFMDf, predictFFMDf)
     exportResult(df[['instance_id','predicted_score']], "%s_oof_train.csv" % modelName)
     exportResult(predictDf[['instance_id','predicted_score']], "%s_oof_test.csv" % modelName)
     # exportResult(predictDf[['instance_id','predicted_score']], "%s.txt" % modelName)
