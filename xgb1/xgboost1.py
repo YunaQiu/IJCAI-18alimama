@@ -8,24 +8,28 @@
         'silent': True,
         'eta': 0.1,
         'max_depth': 4,
-        'gamma': 0.01,
-        'subsample':0.7,
-        'colsample_bytree': 0.75,
+        'gamma': 0.5,
+        'subsample':0.8,
+        'colsample_bytree': 0.8,
         'min_child_weight': 8,
         'max_delta_step': 2,
+        'lambda': 100,
         'num_boost_round': 1500
         'early_stopping_rounds': 10
         'nfold': 3
-特征： 商品一级类目，商品二级类目，商品城市id，商品销量等级，商品收藏量等级，商品价格等级
+特征： 商品一级类目(二级类目替换一级类目)，商品城市id，商品销量等级，商品收藏量等级，商品价格等级
       用户性别编号/用户年龄段/用户星级等级
       小时数，展示页码编号
-      店铺好评率/店铺服务评分/店铺物流评分/店铺描述评分/店铺历史点击数/店铺历史交易数/店铺历史交易率/店铺好评率与同行平均差值/店铺服务评分与同行平均差值/店铺物流评分与同行平均差值/店铺描述评分与同行平均差值
-      用户历史点击数（当天以前），用户历史交易数（当天以前），用户历史转化率（当天以前），用户距离上次点击时长（秒），用户过去一小时点击数
-      商品历史点击数（当天以前），商品历史交易数（当天以前），商品历史转化率（当天以前），商品在同类商品中的历史点击率，商品价格等级与同类均值之差，商品销售等级与同类均值之差
-      用户距离上次浏览该商品的时长，用户过去一小时浏览该商品的次数，用户过去一小时浏览该商品的次数占同类商品的比重
-      用户距离上次浏览该商品类别的时长，用户过去一小时浏览该类别的次数，用户在该类别的历史点击数，用户在该类别的历史交易数，用户在该类别的历史转化率
-      用户浏览该价位的次数占用户浏览记录的比重
-结果： A榜（0.08157）
+      店铺好评率/店铺服务评分/店铺物流评分/店铺描述评分
+      店铺历史点击数/店铺历史交易数/店铺历史交易率/店铺好评率与同行平均差值/店铺服务评分与同行平均差值/店铺物流评分与同行平均差值/店铺描述评分与同行平均差值
+      用户历史点击数（当天以前），用户历史转化率（当天以前），用户距离上次点击时长（秒）
+      商品历史点击数（当天以前），商品历史交易数（当天以前），商品历史转化率（当天以前），商品历史点击数在同类中的占比，商品属性个数
+      根据上下文预测的类目个数，上下文预测类目是否包含该商品类目，商品属性与上下文预测属性的交集个数
+      商品价格等级与同类均值之差，商品销售等级与同类均值之差
+      用户距离上次浏览该商品的时长，用户过去一小时浏览该商品的次数占同类商品的比重
+      用户距离上次浏览该商品类别的时长，用户过去一小时浏览该类别的次数，用户在该类别的历史点击数，用户浏览该类别次数占历史浏览记录的比重，用户在该类别的历史转化率
+      用户浏览该价位的次数占用户浏览记录的比重，用户在该价位的浏览次数
+结果： A榜（0.08149）
 
 '''
 
@@ -38,13 +42,13 @@ import matplotlib.dates
 import matplotlib.pyplot as plt
 from datetime import *
 import urllib, urllib.parse, urllib.request
-import json
+import json, random
 
 from sklearn.preprocessing import *
 import xgboost as xgb
 from sklearn import metrics
 from sklearn.feature_selection import SelectKBest, f_classif
-from sklearn.model_selection import train_test_split, KFold, GridSearchCV
+from sklearn.model_selection import train_test_split, KFold, GridSearchCV, StratifiedKFold
 from sklearn.externals import joblib
 
 # 导入数据
@@ -68,6 +72,30 @@ def scalerFea(df, cols):
     df[cols] = scaler.fit_transform(df[cols].values)
     return df,scaler
 
+# 对数组集合进行合并操作
+def listAdd(l):
+    result = []
+    [result.extend(x) for x in l]
+    return result
+
+# 对不同标签进行抽样处理
+def getSubsample(labelList, ratio=0.8, repeat=False, params=None):
+    if not isinstance(params, dict):
+        if isinstance(ratio, (float, int)):
+            params = {k:{'ratio':ratio, 'repeat':repeat} for k in set(labelList)}
+        else:
+            params={k:{'ratio':ratio[k], 'repeat':repeat} for k in ratio.keys()}
+    resultIdx = []
+    for label in params.keys():
+        param = params[label]
+        tempList = np.where(labelList==label)[0]
+        sampleSize = np.ceil(len(tempList)*params[label]['ratio']).astype(int)
+        if (~param['repeat'])&(param['ratio']<=1):
+            resultIdx.extend(random.sample(tempList.tolist(),sampleSize))
+        else:
+            resultIdx.extend(tempList[np.random.randint(len(tempList),size=sampleSize)])
+    return resultIdx
+
 # 计算单特征与标签的F值
 def getFeaScore(X, y, feaNames):
     resultDf = pd.DataFrame(index=feaNames)
@@ -89,9 +117,7 @@ def biasSmooth(aArr, bArr, method='MME', alpha=None, beta=None):
     ratioArr = aArr / bArr
     if method=='MME':
         alpha,beta = countBetaParamByMME(ratioArr[ratioArr==ratioArr])
-        # print(alpha,beta)
     resultArr = (aArr+alpha) / (bArr+alpha+beta)
-
     return resultArr
 
 # 转化数据集字段格式，并去重
@@ -217,15 +243,17 @@ def addItemFea(df, hisDf=None):
     df = df.merge(tempDf[['item_id','date','item_his_show','item_his_trade','item_his_trade_ratio']], how='left', on=['item_id','date'])
     df['item_his_trade_ratio'].fillna(0, inplace=True)
     df['item_his_show_ratio'] = biasSmooth(df.item_his_show.values, df.cate_his_show.values)
-    df['item_catetrade_ratio_delta'] = df['item_his_trade_ratio'] - df['cate_his_trade_ratio']
+    df['ic_trade_ratio_delta'] = df['item_his_trade_ratio'] - df['cate_his_trade_ratio']
+    df['item_prop_num'] = df['item_property_list'].dropna().map(lambda x: len(x))
 
     itemDf = originDf.drop_duplicates(['item_id'])
     tempDf = pd.pivot_table(itemDf, index=['item_category1'], values=['item_price_level','item_sales_level'], aggfunc=np.mean)
     tempDf.columns = ['cate_price_mean','cate_sales_mean']
     tempDf.reset_index(inplace=True)
     df = df.merge(tempDf, how='left', on='item_category1')
-    df['item_cateprice_delta'] = df['item_price_level'] - df['cate_price_mean']
-    df['item_catesales_delta'] = df['item_sales_level'] - df['cate_sales_mean']
+    df['ic_price_delta'] = df['item_price_level'] - df['cate_price_mean']
+    df['ic_sales_delta'] = df['item_sales_level'] - df['cate_sales_mean']
+    # df['item_catetrade_ratio_delta'] = df['item_his_trade_ratio'] - df['cate_his_trade_ratio']
     return df
 
 # 添加用户维度特征
@@ -389,28 +417,12 @@ def addUserPriceFea(df, hisDf=None):
 
 # 添加广告商品与查询词的相关性特征
 def addContextRelatedFea(df):
-    cate1List = []
-    cate2List = []
-    propList = []
-    for cate1,cate2,prop,pred in df[['item_category1','item_category2','item_property_list','predict_category_property']].values:
-        if isinstance(pred, float):
-            cate1List.append(0)
-            cate2List.append(0)
-            propList.append(0)
-        else:
-            hasCate1 = cate1 in pred.keys()
-            hasCate2 = cate2 in pred.keys()
-            cate1List.append(1 if hasCate1 else 0)
-            cate2List.append(1 if hasCate2 else 0)
-            if hasCate2:
-                propList.append(len(set(prop).intersection(set(pred[cate2]))))
-            elif hasCate1:
-                propList.append(len(set(prop).intersection(set(pred[cate1]))))
-            else:
-                propList.append(0)
-    df['same_category1'] = cate1List
-    df['same_category2'] = cate2List
-    df['same_prop_num'] = propList
+    df['predict_category'] = df['predict_category_property'].dropna().map(lambda x: list(x.keys()))
+    df['has_predict_cate_num'] = df['predict_category'].dropna().map(lambda x: len(x))
+    df.loc[df.predict_category_property.notnull(),'has_predict_category'] = list(map(lambda x: 1 if x[0] in x[1] else 0, df.loc[df.predict_category.notnull(), ['item_category1','predict_category']].values))
+    df.loc[df.has_predict_category==1,'predict_property'] = list(map(lambda x: x[1][x[0]], df.loc[df.has_predict_category==1, ['item_category1','predict_category_property']].values))
+    df.loc[df.predict_property.notnull(), 'has_predict_prop_num'] = list(map(lambda x: len(np.intersect1d(x[0],x[1])), df.loc[df.predict_property.notnull(), ['item_property_list','predict_property']].values))
+    df.fillna({k:0 for k in ['has_predict_cate_num','has_predict_prop_num','has_predict_category']}, inplace=True)
     return df
 
 class XgbModel:
@@ -427,7 +439,6 @@ class XgbModel:
             'colsample_bytree': 0.8,
             'min_child_weight': 8,
             'max_delta_step': 2,
-            # 'alpha':1600,
             'lambda': 100,
         }
         for k,v in params.items():
@@ -469,35 +480,36 @@ class XgbModel:
         )
         self.clf = clf
 
-    def gridSearch(self, X, y, nFold=3, verbose=1, num_boost_round=120):
+    def gridSearch(self, X, y, nFold=3, verbose=1, num_boost_round=130):
         paramsGrids = {
             # 'n_estimators': [50+5*i for i in range(0,30)],
-            # 'gamma': [0+0.5*i for i in range(0,10)],
-            # 'max_depth': list(range(3,10)),
-            # 'min_child_weight': list(range(1,10)),
-            # 'subsample': [1-0.05*i for i in range(0,8)],
-            # 'colsample_bytree': [1-0.05*i for i in range(0,10)],
+            'gamma': [0+5*i for i in range(0,10)],
+            'max_depth': list(range(3,10)),
+            'min_child_weight': list(range(0,10)),
+            'subsample': [1-0.05*i for i in range(0,8)],
+            'colsample_bytree': [1-0.05*i for i in range(0,10)],
             # 'reg_alpha': [0+2*i for i in range(0,10)],
-            'reg_lambda': [0+10**i for i in range(0,4)],            
+            # 'reg_lambda': [0+10**i for i in range(0,4)],            
             # 'max_delta_step': [0+1*i for i in range(0,8)],
         }
         for k,v in paramsGrids.items():
             gsearch = GridSearchCV(
                 estimator = xgb.XGBClassifier(
                     max_depth = self.params['max_depth'], 
-                    # gamma = self.params['gamma'],
+                    gamma = self.params['gamma'],
                     learning_rate = self.params['eta'],
                     max_delta_step = self.params['max_delta_step'],
                     min_child_weight = self.params['min_child_weight'],
                     subsample = self.params['subsample'],
                     colsample_bytree = self.params['colsample_bytree'],
                     silent = self.params['silent'],
-                    # reg_alpha = self.params['alpha'],
+                    reg_lambda = self.params['lambda'],
                     n_estimators = num_boost_round
                 ),
                 # param_grid = paramsGrids,
                 param_grid = {k:v},
-                scoring = 'neg_log_loss',
+                scoring = 'roc_auc',
+                # scoring = 'neg_log_loss',
                 cv = nFold,
                 verbose = verbose,
                 n_jobs = 4
@@ -535,7 +547,7 @@ def feaFactory(df, hisDf=None):
     df = addUserCateFea(df, hisDf)
     df = addUserItemFea(df, hisDf)
     df = addUserPriceFea(df, hisDf)
-    # df = addContextRelatedFea(df)
+    df = addContextRelatedFea(df)
     print('finished feaFactory: ', datetime.now() - startTime)
     return df
 
@@ -561,12 +573,15 @@ def countDeltaY(predictSeries, labelSeries, show=True, title='', subplot=None):
     return deltaSeries
 
 # 获取stacking下一层数据集
-def getOof(clf, trainX, trainY, testX, nFold=5):
+def getOof(clf, trainX, trainY, testX, nFold=5, stratify=False):
     oofTrain = np.zeros(trainX.shape[0])
     oofTest = np.zeros(testX.shape[0])
     oofTestSkf = np.zeros((testX.shape[0], nFold))
-    kf = KFold(n_splits=nFold, shuffle=True)
-    for i, (trainIdx, testIdx) in enumerate(kf.split(trainX)):
+    if stratify:
+        kf = StratifiedKFold(n_splits=nFold, shuffle=True)
+    else:
+        kf = KFold(n_splits=nFold, shuffle=True)
+    for i, (trainIdx, testIdx) in enumerate(kf.split(trainX, trainY)):
         kfTrainX = trainX[trainIdx]
         kfTrainY = trainY[trainIdx]
         kfTestX = trainX[testIdx]
@@ -585,23 +600,25 @@ if __name__ == '__main__':
     df = feaFactory(df)
 
     # 特征筛选
-    tempCol = ['shop_his_show','shop_his_trade','shop_his_trade_ratio','shop_review_positive_delta','shop_score_service_delta','shop_score_delivery_delta','shop_score_description_delta']
+    tempCol = ['has_predict_cate_num','has_predict_prop_num','has_predict_category','item_prop_num']
     resultDf = getFeaScore(df.dropna(subset=tempCol)[tempCol].values, df.dropna(subset=tempCol)['is_trade'].values, tempCol)
     print(resultDf[resultDf.scores>0])
     fea = [
         'item_category1','item_city_id', 'item_sales_level','item_collected_level','item_price_level',#'item_id','item_category2',
         'user_gender_id','user_age_level','user_star_level',#'user_id',
         'hour','context_page_id',#'hour2',
-        'shop_review_positive_rate','shop_score_service','shop_score_delivery','shop_score_description','shop_his_show','shop_his_trade','shop_his_trade_ratio','shop_score_service_delta','shop_score_delivery_delta','shop_score_description_delta','shop_review_positive_delta',#'shop_id',
-        #'cate_his_trade_ratio',#'cate_his_show','cate_his_trade',
-        'user_his_show','user_his_trade_ratio','user_last_show_timedelta',#'user_lasthour_show','user_his_trade',
-        'item_his_show','item_his_trade','item_his_trade_ratio','item_his_show_ratio','item_catesales_delta','item_cateprice_delta',#'item_catetrade_ratio_delta',
+        'shop_review_positive_rate','shop_score_service','shop_score_delivery','shop_score_description',
+        'shop_his_show','shop_his_trade','shop_his_trade_ratio','shop_score_service_delta','shop_score_delivery_delta','shop_score_description_delta','shop_review_positive_delta',#'shop_id',
+        'user_his_show','user_his_trade_ratio','user_last_show_timedelta','user_lasthour_show',#'user_his_trade',
+        'item_his_show','item_his_trade','item_his_trade_ratio','item_his_show_ratio','item_prop_num',
+        'has_predict_cate_num','has_predict_prop_num','has_predict_category',
+        'ic_sales_delta','ic_price_delta',#'item_catetrade_ratio_delta',
         'ui_last_show_timedelta','ui_lasthour_show_ratio',#'ui_lasthour_show',#'ui_lastdate_show','ui_lastdate_trade',
-        'uc_last_show_timedelta','uc_lasthour_show','uc_his_show', 'uc_his_trade','uc_his_trade_ratio',
-        'up_his_show_ratio',#'up_his_show',#'up_his_trade',
+        'uc_last_show_timedelta','uc_lasthour_show','uc_his_show','uc_his_trade_ratio','uc_his_show_ratio',# 'uc_his_trade',
+        'up_his_show_ratio','up_his_show',#'up_his_trade',
     ]
     print(df[fea].info())
-    # exit()
+
 
     # 测试模型效果
     costDf = pd.DataFrame(index=fea+['cost','oof_cost'])
@@ -611,16 +628,15 @@ if __name__ == '__main__':
         # xgbModel.gridSearch(trainDf[fea].values, trainDf['is_trade'].values)
         xgbModel.trainCV(trainDf[fea].values, trainDf['is_trade'].values)
         testDf.loc[:,'predict'] = xgbModel.predict(testDf[fea].values)
-        _,testDf.loc[:,'oof_predict'] = getOof(xgbModel, trainDf[fea].values, trainDf['is_trade'].values, testDf[fea].values)
+        _,testDf.loc[:,'oof_predict'] = getOof(xgbModel, trainDf[fea].values, trainDf['is_trade'].values, testDf[fea].values, stratify=True)
         scoreDf = xgbModel.getFeaScore()
         scoreDf.columns = [dt.strftime('%Y-%m-%d')]
         costDf = costDf.merge(scoreDf, how='left', left_index=True, right_index=True)
         cost = metrics.log_loss(testDf['is_trade'].values, testDf['predict'].values)
         costDf.loc['cost',dt.strftime('%Y-%m-%d')] = cost
-        cost = metrics.log_loss(testDf['is_trade'].values, testDf['oof_predict'].values)
-        costDf.loc['oof_cost',dt.strftime('%Y-%m-%d')] = cost
+        costDf.loc['oof_cost',dt.strftime('%Y-%m-%d')] = metrics.log_loss(testDf['is_trade'].values, testDf['oof_predict'].values)
     print(costDf)
-    # exit()
+    exit()
 
     # 正式模型
     modelName = "xgboost1A"
@@ -643,12 +659,12 @@ if __name__ == '__main__':
     predictDf.loc[:,'predicted_score'] = xgbModel.predict(predictDf[fea].values)
     print("预测结果：\n",predictDf[['instance_id','predicted_score']].head())
     # exportResult(predictDf, "%s_predict.csv" % modelName)
-    # exportResult(predictDf[['instance_id','predicted_score']], "%s.txt" % modelName)
+    exportResult(predictDf[['instance_id','predicted_score']], "%s.txt" % modelName)
 
     # 生成stacking数据集
     df['predicted_score'] = np.nan
     predictDf['predicted_score'] = np.nan
-    df.loc[:,'predicted_score'], predictDf.loc[:,'predicted_score'] = getOof(xgbModel, df[fea].values, df['is_trade'].values, predictDf[fea].values)
+    df.loc[:,'predicted_score'], predictDf.loc[:,'predicted_score'] = getOof(xgbModel, df[fea].values, df['is_trade'].values, predictDf[fea].values, stratify=True)
     exportResult(df[['instance_id','predicted_score']], "%s_oof_train.csv" % modelName)
     exportResult(predictDf[['instance_id','predicted_score']], "%s_oof_test.csv" % modelName)
-    exportResult(predictDf[['instance_id','predicted_score']], "%s.txt" % modelName)
+    # exportResult(predictDf[['instance_id','predicted_score']], "%s.txt" % modelName)
