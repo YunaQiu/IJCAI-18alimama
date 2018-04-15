@@ -6,7 +6,7 @@
 模型参数：'objective': 'binary:logistic',
         'eval_metric':'logloss',
         'silent': True,
-        'eta': 0.1,
+        'eta': 0.05,
         'max_depth': 4,
         'gamma': 0.5,
         'subsample':0.95,
@@ -20,26 +20,28 @@
 特征： 商品一级类目(二级类目替换一级类目)，商品城市id，商品销量等级，商品收藏量等级，商品价格等级
       用户性别编号/用户年龄段/用户星级等级
       小时数，展示页码编号
-      店铺好评率/店铺服务评分/店铺物流评分/店铺描述评分
-      店铺历史点击数/店铺历史交易数/店铺历史交易率/店铺好评率与同行平均差值/店铺服务评分与同行平均差值/店铺物流评分与同行平均差值/店铺描述评分与同行平均差值
-      店铺收藏等级总和/店铺广告投放等级总和/店铺商品数目/店铺销售等级总和
-      类别历史点击数，类别历史交易数，类别历史转化率，类别价格均值，类别销量等级均值
       用户历史点击数（当天以前），用户历史转化率（当天以前），用户距离上次点击时长（秒），用户过去一小时的点击数
       商品历史点击数（当天以前），商品历史交易数（当天以前），商品历史转化率（当天以前），商品历史点击数在同类中的占比，商品属性个数
-      根据上下文预测的类目个数，上下文预测类目是否包含该商品类目，商品属性与上下文预测属性的交集个数
-      该品牌商品收藏等级均值，该品牌商品数目，品牌销售等级均值
-      商品价格等级与同类均值之差，商品销售等级与同类均值之差
-      该商品用户的年龄方差，该用户年龄等级与商品用户年龄均值之差
-      该用户性别在该商品用户中的占比，该性别在该商品中的占比与全部用户的性别比之差
-      用户距离上次浏览该商品的时长，用户过去一小时浏览该商品的次数占同类商品的比重
-      用户距离上次浏览该商品类别的时长，用户过去一小时浏览该类别的次数，用户在该类别的历史点击数，用户浏览该类别次数占历史浏览记录的比重，用户在该类别的历史转化率
-      用户浏览该价位的次数占用户浏览记录的比重，用户在该价位的浏览次数
-      该用户年龄与该类别平均年龄差值，该类别年龄均值，该类别年龄方差
-      该性别在该类别用户群中占比，该类别的性别比例与全体用户性别比例之差
-      该店铺用户年龄方差，该用户年龄均值，该用户年龄与该店铺年龄均值之差
-      该性别在该店铺用户群中占比，店铺的性别比例与全体用户性别比例之差
-      品牌销售等级与同类商品均值之差，品牌收藏等级与同类商品均值之差
-结果： A榜（0.08119）
+      商品年龄均值，商品年龄方差，用户年龄与商品平均年龄之差
+      该性别在该商品用户群中的占比，该商品性别比与全体用户性别比之差
+      店铺好评率/店铺服务评分/店铺物流评分/店铺描述评分
+      店铺历史点击数，店铺历史交易率
+      店铺年龄均值，店铺年龄方差，用户年龄与店铺平均年龄之差
+      该性别在该店铺用户群中的占比，店铺性别比与全体用户性别比之差
+      店铺收藏等级总和/均值，店铺价格总和/均值，店铺广告投放等级总和/均值，店铺销售等级总和/均值，店铺商品数目
+      店铺好评率与同行平均差值/店铺服务评分与同行平均差值/店铺物流评分与同行平均差值/店铺描述评分与同行平均差值
+      类别历史点击数，类别历史转化率，
+      类别年龄均值，类别年龄方差，用户年龄与类别平均年龄差值
+      类别性别比，类别性别比与全体用户性别比之差
+      类别收藏等级总和/均值，类别价格总和/均值，类别广告投放等级总和/均值，类别销售等级总和/均值，类别商品数目
+      品牌收藏等级总和/均值，类别销售等级总和/均值，类别商品数目
+      上下文预测类目个数，上下文预测类目是否包含该商品类目，商品属性与上下文预测属性的交集个数
+      商品与同类销售均值之差，商品与同类价格均值之差
+      用户距离上次浏览该商品的时长，用户过去一小时浏览该商品次数，用户过去一小时浏览该商品的次数占同类商品的比重
+      用户距离上次浏览该类别的时长，用户过去一小时浏览该类别的次数，用户在该类别的历史点击数，用户在该类别的历史转化率，用户浏览该类别次数占用户历史浏览的比重
+      用户浏览该价位的次数占用户历史浏览的比重，用户历史浏览该价位的次数
+      品牌销售等级与同类均值之差，品牌收藏等级与同类均值之差
+结果： A榜（0.08108）
 
 '''
 
@@ -133,8 +135,7 @@ def biasSmooth(aArr, bArr, method='MME', alpha=None, beta=None):
 # 转化数据集字段格式，并去重
 def formatDf(df):
     df = df.applymap(lambda x: np.nan if (x==-1)|(x=='-1') else x)
-    df.drop_duplicates(inplace=True)
-    df['context_timestamp'] = pd.to_datetime(df.context_timestamp, unit='s')
+    df['context_timestamp'] = df['context_timestamp'].map(lambda x: datetime.fromtimestamp(x))
     return df
 
 # 拆分多维度拼接的字段
@@ -157,71 +158,60 @@ def combineKey(df):
     df['user_shop'] = df['user_id'].astype('str') + '_' + df['shop_id'].astype('str')
     return df
 
+# 按日期统计过去几天的点击数，交易数
+def statDateTrade(df, index, statDates=None, skipDates=1):
+    tempDf = pd.pivot_table(df, index=index, columns='date', values='is_trade', aggfunc=[len,np.sum])
+    if statDates==None:
+        for i,dt in enumerate(tempDf.columns.levels[-1][skipDates:]):
+            tempDf.loc[:,pd.IndexSlice['show',dt]] = tempDf['len'].iloc[:,:i+skipDates].sum(axis=1)
+            tempDf.loc[:,pd.IndexSlice['trade',dt]] = tempDf['sum'].iloc[:,:i+skipDates].sum(axis=1)
+    else:
+        for i,dt in enumerate(tempDf.columns.levels[-1][statDates:]):
+            tempDf.loc[:,pd.IndexSlice['show',dt]] = tempDf['len'].iloc[:,i:i+statDates].sum(axis=1)
+            tempDf.loc[:,pd.IndexSlice['trade',dt]] = tempDf['sum'].iloc[:,i:i+statDates].sum(axis=1)
+    tempDf = tempDf.stack()
+    return tempDf[['show','trade']]
+
 # 添加时间特征
-def addTimeFea(df):
+def addTimeFea(df, **params):
     df['hour'] = df.context_timestamp.dt.hour
-    df['hour2'] = df['hour'] // 2
+    df['hour2'] = ((df['hour']+1) // 2) % 12
+    # df['hour2'] = df['hour'] // 2
     df['day'] = df.context_timestamp.dt.day
     df['date'] = pd.to_datetime(df.context_timestamp.dt.date)
     return df
 
 # 添加商品类别统计特征
-def addCateFea(df, hisDf=None):
-    if isinstance(hisDf, pd.DataFrame):
-        originDf = pd.concat([hisDf,df],ignore_index=True)
-    else:
+def addCateFea(df, originDf=None, **params):
+    if not isinstance(originDf, pd.DataFrame):
         originDf = df.copy()
-    tempDf = pd.pivot_table(originDf, index=['item_category1','date'], values=['is_trade'], aggfunc=[len, np.sum])
-    tempDf.columns = ['show','trade']
-    tempDf.reset_index(inplace=True)
-    tempDf['same'] = tempDf['item_category1'].shift(1)
-    tempDf['same'] = tempDf['same']==tempDf['item_category1']
-    showList = []
-    tradeList = []
-    showTemp = tradeTemp = 0
-    for same,c,t in tempDf[['same','show','trade']].values:
-        showList.append(showTemp if same else 0)
-        tradeList.append(tradeTemp if same else 0)
-        showTemp = showTemp+c if same else c
-        tradeTemp = tradeTemp+t if same else t
-    tempDf['cate_his_show'] = showList
-    tempDf['cate_his_trade'] = tradeList
+    tempDf = statDateTrade(originDf, 'item_category1', **params['statDateTrade'])
+    tempDf.columns = ['cate_his_show','cate_his_trade']
     tempDf['cate_his_trade_ratio'] = biasSmooth(tempDf.cate_his_trade.values, tempDf.cate_his_show.values)
-    df = df.merge(tempDf[['item_category1','date','cate_his_show','cate_his_trade','cate_his_trade_ratio']], how='left', on=['item_category1','date'])
+    startDate = pd.to_datetime('2018-09-17')
+    startDate += timedelta(days=params['statDateTrade']['skipDates']) if params['statDateTrade']['statDates']==None else timedelta(days=params['statDateTrade']['statDates'])
+    tempDf['cate_his_show_perday'] = tempDf['cate_his_show'] / (tempDf.index.get_level_values('date')-startDate).days
+    df = df.merge(tempDf, how='left', left_on=['item_category1','date'], right_index=True)
 
     itemDf = originDf.drop_duplicates(['item_id'])
-    tempDf = pd.pivot_table(itemDf, index=['item_category1'], values=['item_price_level','item_sales_level','item_collected_level','item_pv_level'], aggfunc=np.mean)
-    tempDf.columns = ['cate_collected_mean','cate_price_mean','cate_pv_mean','cate_sales_mean']
+    tempDf = pd.pivot_table(itemDf, index=['item_category1'], values=['item_price_level','item_sales_level','item_collected_level','item_pv_level'], aggfunc={'item_sales_level':[len,np.sum,np.mean], 'item_collected_level':[np.sum,np.mean], 'item_pv_level':[np.sum,np.mean], 'item_price_level':[np.sum,np.mean]})
+    tempDf.columns = ['cate_collected_mean','cate_collected_sum','cate_price_mean','cate_price_sum','cate_pv_mean','cate_pv_sum','cate_item_count','cate_sales_mean','cate_sales_sum']
     tempDf.reset_index(inplace=True)
     df = df.merge(tempDf, how='left', on='item_category1')
     return df
 
 # 添加商品历史浏览量及购买量特征
-def addShopFea(df, hisDf=None):
-    if isinstance(hisDf, pd.DataFrame):
-        originDf = pd.concat([hisDf,df],ignore_index=True)
-    else:
+def addShopFea(df, originDf=None, **params):
+    if not isinstance(originDf, pd.DataFrame):
         originDf = df.copy()
-    tempDf = pd.pivot_table(originDf, index=['shop_id','date'], values='is_trade', aggfunc=[len, sum])
-    tempDf.columns = ['show','trade']
-    tempDf.reset_index(inplace=True)
-    tempDf['same_shop'] = tempDf['shop_id'].shift(1)
-    tempDf['same_shop'] = tempDf['shop_id'] == tempDf['same_shop']
-    showList = []
-    tradeList = []
-    showTemp = tradeTemp = 0
-    for same,c,t in tempDf[['same_shop','show','trade']].values:
-        showList.append(showTemp if same else 0)
-        tradeList.append(tradeTemp if same else 0)
-        showTemp = showTemp+c if same else c
-        tradeTemp = tradeTemp+t if same else t
-    tempDf['shop_his_show'] = showList
-    tempDf['shop_his_trade'] = tradeList
+    tempDf = statDateTrade(originDf, 'shop_id', **params['statDateTrade'])
+    tempDf.columns = ['shop_his_show','shop_his_trade']
     tempDf['shop_his_trade_ratio'] = biasSmooth(tempDf.shop_his_trade.values, tempDf.shop_his_show.values)
-    df = df.merge(tempDf[['shop_id','date','shop_his_show','shop_his_trade','shop_his_trade_ratio']], how='left', on=['shop_id','date'])
-    df['shop_his_trade_ratio'].fillna(0, inplace=True)
+    startDate = pd.to_datetime('2018-09-17')
+    startDate += timedelta(days=params['statDateTrade']['skipDates']) if params['statDateTrade']['statDates']==None else timedelta(days=params['statDateTrade']['statDates'])
+    tempDf['shop_his_show_perday'] = tempDf['shop_his_show'] / (tempDf.index.get_level_values('date')-startDate).days
+    df = df.merge(tempDf, how='left', left_on=['shop_id','date'], right_index=True)
     df['shop_his_show_ratio'] = biasSmooth(df.shop_his_show.values, df.cate_his_show.values)
-    df['shop_catetrade_ratio_delta'] = df['shop_his_trade_ratio'] - df['cate_his_trade_ratio']
 
     shopDf = originDf.drop_duplicates(['item_category1','shop_id'], keep='last')
     tempDf = pd.pivot_table(shopDf, index=['item_category1'], values=['shop_review_positive_rate','shop_score_service','shop_score_delivery','shop_score_description'], aggfunc=np.mean)
@@ -234,62 +224,37 @@ def addShopFea(df, hisDf=None):
     df['shop_score_description_delta'] = df['shop_score_description'] - df['shop_score_description_mean']
 
     itemDf = originDf.drop_duplicates(['item_id'])
-    tempDf = pd.pivot_table(itemDf, index=['shop_id'], values=['item_sales_level','item_collected_level','item_pv_level'], aggfunc={'item_sales_level':[len,np.sum], 'item_collected_level':np.sum, 'item_pv_level':np.sum})
-    tempDf.columns = ['shop_collected_level','shop_pv_level','shop_item_count','shop_sales_level']
+    tempDf = pd.pivot_table(itemDf, index=['shop_id'], values=['item_sales_level','item_collected_level','item_pv_level','item_price_level'], aggfunc={'item_sales_level':[len,np.sum,np.mean], 'item_collected_level':[np.sum,np.mean], 'item_pv_level':[np.sum,np.mean], 'item_price_level':[np.sum,np.mean]})
+    tempDf.columns = ['shop_collected_mean','shop_collected_sum','shop_price_mean','shop_price_sum','shop_pv_mean','shop_pv_sum','shop_item_count','shop_sales_mean','shop_sales_sum']
     df = df.merge(tempDf, how='left', left_on='shop_id',right_index=True)
     return df
 
 # 添加商品历史浏览量及购买量特征
-def addItemFea(df, hisDf=None):
-    if isinstance(hisDf, pd.DataFrame):
-        originDf = pd.concat([hisDf,df],ignore_index=True)
-    else:
+def addItemFea(df, originDf=None, **params):
+    if not isinstance(originDf, pd.DataFrame):
         originDf = df.copy()
-    tempDf = pd.pivot_table(originDf, index=['item_id','date'], values='is_trade', aggfunc=[len, sum])
-    tempDf.columns = ['show','trade']
-    tempDf.reset_index(inplace=True)
-    tempDf['same_item'] = tempDf['item_id'].shift(1)
-    tempDf['same_item'] = tempDf['item_id'] == tempDf['same_item']
-    showList = []
-    tradeList = []
-    showTemp = tradeTemp = 0
-    for same,c,t in tempDf[['same_item','show','trade']].values:
-        showList.append(showTemp if same else 0)
-        tradeList.append(tradeTemp if same else 0)
-        showTemp = showTemp+c if same else c
-        tradeTemp = tradeTemp+t if same else t
-    tempDf['item_his_show'] = showList
-    tempDf['item_his_trade'] = tradeList
+    tempDf = statDateTrade(originDf, 'item_id', **params['statDateTrade'])
+    tempDf.columns = ['item_his_show','item_his_trade']
     tempDf['item_his_trade_ratio'] = biasSmooth(tempDf.item_his_trade.values, tempDf.item_his_show.values)
-    df = df.merge(tempDf[['item_id','date','item_his_show','item_his_trade','item_his_trade_ratio']], how='left', on=['item_id','date'])
-    df['item_his_trade_ratio'].fillna(0, inplace=True)
+    startDate = pd.to_datetime('2018-09-17')
+    startDate += timedelta(days=params['statDateTrade']['skipDates']) if params['statDateTrade']['statDates']==None else timedelta(days=params['statDateTrade']['statDates'])
+    tempDf['item_his_show_perday'] = tempDf['item_his_show'] / (tempDf.index.get_level_values('date')-startDate).days
+    df = df.merge(tempDf, how='left', left_on=['item_id','date'], right_index=True)
     df['item_his_show_ratio'] = biasSmooth(df.item_his_show.values, df.cate_his_show.values)
     df['item_prop_num'] = df['item_property_list'].dropna().map(lambda x: len(x))
     return df
 
 # 添加用户维度特征
-def addUserFea(df, hisDf=None):
-    if isinstance(hisDf, pd.DataFrame):
-        originDf = pd.concat([hisDf,df],ignore_index=True)
-    else:
+def addUserFea(df, originDf=None, **params):
+    if not isinstance(originDf, pd.DataFrame):
         originDf = df.copy()
-    tempDf = pd.pivot_table(originDf, index=['user_id','date'], values=['is_trade'], aggfunc=[len,np.sum])
-    tempDf.columns = ['show', 'trade']
-    tempDf.reset_index(inplace=True)
-    tempDf['last_user'] = tempDf['user_id'].shift(1)
-    tempDf['last_user'] = tempDf['user_id']==tempDf['last_user']
-    showList,tradeList = [[] for i in range(2)]
-    showTemp = tradeTemp = 0
-    for same,show,trade in tempDf[['last_user','show', 'trade']].values:
-        showList.append(showTemp if same else 0)
-        showTemp = showTemp+show if same else show
-        tradeList.append(tradeTemp if same else 0)
-        tradeTemp = tradeTemp+trade if same else trade
-    tempDf['user_his_show'] = showList
-    tempDf['user_his_trade'] = tradeList
+    tempDf = statDateTrade(originDf, 'user_id', **params['statDateTrade'])
+    tempDf.columns = ['user_his_show','user_his_trade']
     tempDf['user_his_trade_ratio'] = biasSmooth(tempDf.user_his_trade.values, tempDf.user_his_show.values)
-    df = df.merge(tempDf[['user_id','date','user_his_show', 'user_his_trade','user_his_trade_ratio']], how='left', on=['user_id','date'])
-    df['user_his_trade_ratio'].fillna(0, inplace=True)
+    startDate = pd.to_datetime('2018-09-17')
+    startDate += timedelta(days=params['statDateTrade']['skipDates']) if params['statDateTrade']['statDates']==None else timedelta(days=params['statDateTrade']['statDates'])
+    tempDf['user_his_show_perday'] = tempDf['user_his_show'] / (tempDf.index.get_level_values('date')-startDate).days
+    df = df.merge(tempDf, how='left', left_on=['user_id','date'], right_index=True)
 
     tempDf = pd.pivot_table(originDf, index=['user_id','context_timestamp'], values=['is_trade'], aggfunc=len)
     tempDf.columns = ['show']
@@ -316,7 +281,7 @@ def addUserFea(df, hisDf=None):
     return df
 
 # 添加广告商品与查询词的相关性特征
-def addContextFea(df):
+def addContextFea(df, **params):
     df['predict_category'] = df['predict_category_property'].dropna().map(lambda x: list(x.keys()))
     df['has_predict_cate_num'] = df['predict_category'].dropna().map(lambda x: len(x))
     df.loc[df.predict_category_property.notnull(),'has_predict_category'] = list(map(lambda x: 1 if x[0] in x[1] else 0, df.loc[df.predict_category.notnull(), ['item_category1','predict_category']].values))
@@ -326,22 +291,26 @@ def addContextFea(df):
     return df
 
 # 添加品牌相关特征
-def addBrandFea(df, hisDf=None):
-    if isinstance(hisDf, pd.DataFrame):
-        originDf = pd.concat([hisDf,df], ignore_index=True)
-    else:
+def addBrandFea(df, originDf=None, **params):
+    if not isinstance(originDf, pd.DataFrame):
         originDf = df.copy()
+    tempDf = statDateTrade(originDf, 'item_brand_id', **params['statDateTrade'])
+    tempDf.columns = ['brand_his_show','brand_his_trade']
+    tempDf['brand_his_trade_ratio'] = biasSmooth(tempDf.brand_his_trade.values, tempDf.brand_his_show.values)
+    startDate = pd.to_datetime('2018-09-17')
+    startDate += timedelta(days=params['statDateTrade']['skipDates']) if params['statDateTrade']['statDates']==None else timedelta(days=params['statDateTrade']['statDates'])
+    tempDf['brand_his_show_perday'] = tempDf['brand_his_show'] / (tempDf.index.get_level_values('date')-startDate).days
+    df = df.merge(tempDf, how='left', left_on=['item_brand_id','date'], right_index=True)
+
     itemDf = originDf.drop_duplicates(['item_id'])
-    tempDf = pd.pivot_table(itemDf, index=['item_brand_id'], values=['item_sales_level','item_collected_level'], aggfunc={'item_sales_level':[len,np.mean], 'item_collected_level':np.mean})
-    tempDf.columns = ['brand_colleted_level','brand_item_count','brand_sales_level']
+    tempDf = pd.pivot_table(itemDf, index=['item_brand_id'], values=['item_sales_level','item_collected_level'], aggfunc={'item_sales_level':[len,np.mean,np.sum], 'item_collected_level':[np.mean,np.sum]})
+    tempDf.columns = ['brand_colleted_mean','brand_colleted_sum','brand_item_count','brand_sales_mean','brand_sales_sum']
     df = df.merge(tempDf, how='left', left_on='item_brand_id', right_index=True)
     return df
 
 # 添加用户与类目关联维度的特征
-def addUserCateFea(df, hisDf=None):
-    if isinstance(hisDf, pd.DataFrame):
-        originDf = pd.concat([hisDf,df],ignore_index=True)
-    else:
+def addUserCateFea(df, originDf=None, **params):
+    if not isinstance(originDf, pd.DataFrame):
         originDf = df.copy()
     tempDf = pd.pivot_table(originDf, index=['user_id','item_category1','context_timestamp'], values=['is_trade'], aggfunc=len)
     tempDf.columns = ['show']
@@ -365,31 +334,19 @@ def addUserCateFea(df, hisDf=None):
     tempDf['uc_lasthour_show'] = hourShowList
     df = df.merge(tempDf[['user_id','item_category1','context_timestamp','uc_last_show_timedelta','uc_lasthour_show']], how='left', on=['user_id','item_category1','context_timestamp'])
 
-    tempDf = pd.pivot_table(originDf, index=['user_id','item_category1','date'], values=['is_trade'], aggfunc=[len,np.sum])
-    tempDf.columns = ['show', 'trade']
-    tempDf.reset_index(inplace=True)
-    tempDf[['last_user','last_cate']] = tempDf[['user_id','item_category1']].shift(1)
-    tempDf['same'] = (tempDf.last_user==tempDf.user_id) & (tempDf.last_cate==tempDf.item_category1)
-    showList,tradeList = ([] for i in range(2))
-    showTemp = tradeTemp = 0
-    for same,show,trade in tempDf[['same','show','trade']].values:
-        showList.append(showTemp if same else 0)
-        tradeList.append(tradeTemp if same else 0)
-        showTemp = showTemp+show if same else show
-        tradeTemp = tradeTemp+trade if same else trade
-    tempDf['uc_his_show'] = showList
-    tempDf['uc_his_trade'] = tradeList
+    tempDf = statDateTrade(originDf, ['user_id','item_category1'], **params['statDateTrade'])
+    tempDf.columns = ['uc_his_show','uc_his_trade']
     tempDf['uc_his_trade_ratio'] = biasSmooth(tempDf.uc_his_trade.values, tempDf.uc_his_show.values)
-    df = df.merge(tempDf[['user_id','item_category1','date','uc_his_show', 'uc_his_trade','uc_his_trade_ratio']], how='left', on=['user_id','item_category1','date'])
-    df.fillna({k:0 for k in ['uc_lastdate_show','uc_lastdate_trade','uc_his_trade_ratio']}, inplace=True)
+    startDate = pd.to_datetime('2018-09-17')
+    startDate += timedelta(days=params['statDateTrade']['skipDates']) if params['statDateTrade']['statDates']==None else timedelta(days=params['statDateTrade']['statDates'])
+    tempDf['uc_his_show_perday'] = tempDf['uc_his_show'] / (tempDf.index.get_level_values('date')-startDate).days
+    df = df.merge(tempDf, how='left', left_on=['user_id','item_category1','date'], right_index=True)
     df['uc_his_show_ratio'] = biasSmooth(df.uc_his_show.values, df.user_his_show.values)
     return df
 
 # 添加用户商品关联维度的特征
-def addUserItemFea(df, hisDf=None):
-    if isinstance(hisDf, pd.DataFrame):
-        originDf = pd.concat([hisDf,df],ignore_index=True)
-    else:
+def addUserItemFea(df, originDf=None, **params):
+    if not isinstance(originDf, pd.DataFrame):
         originDf = df.copy()
     tempDf = pd.pivot_table(originDf, index=['user_item','context_timestamp'], values=['is_trade'], aggfunc=len)
     tempDf.columns = ['show']
@@ -424,59 +381,52 @@ def addUserItemFea(df, hisDf=None):
     return df
 
 # 统计用户该价格段商品的统计特征
-def addUserPriceFea(df, hisDf=None):
-    if isinstance(hisDf, pd.DataFrame):
-        originDf = pd.concat([hisDf,df], ignore_index=True)
-    else:
+def addUserPriceFea(df, originDf=None, **params):
+    if not isinstance(originDf, pd.DataFrame):
         originDf = df.copy()
-    tempDf = pd.pivot_table(originDf, index=['user_id','item_price_level','date'], values='is_trade', aggfunc=[len,np.sum])
-    tempDf.columns = ['show','trade']
-    tempDf.reset_index(inplace=True)
-    tempDf[['last_user','last_price']] = tempDf[['user_id','item_price_level']].shift(1)
-    tempDf['same'] = (tempDf['user_id']==tempDf['last_user']) & (tempDf['item_price_level']==tempDf['last_price'])
-    showList,tradeList = ([] for i in range(2))
-    showTemp = tradeTemp = 0
-    for same,show,trade in tempDf[['same','show','trade']].values:
-        showList.append(showTemp if same else 0)
-        tradeList.append(tradeTemp if same else 0)
-        showTemp = showTemp+show if same else show
-        tradeTemp = tradeTemp+trade if same else trade
-    tempDf['up_his_show'] = showList
-    tempDf['up_his_trade'] = tradeList
-    df = df.merge(tempDf[['user_id','item_price_level','date','up_his_show','up_his_trade']], how='left', on=['user_id','item_price_level','date'])
+    tempDf = statDateTrade(originDf, ['user_id','item_price_level'], **params['statDateTrade'])
+    tempDf.columns = ['up_his_show','up_his_trade']
+    tempDf['up_his_trade_ratio'] = biasSmooth(tempDf.up_his_trade.values, tempDf.up_his_show.values)
+    startDate = pd.to_datetime('2018-09-17')
+    startDate += timedelta(days=params['statDateTrade']['skipDates']) if params['statDateTrade']['statDates']==None else timedelta(days=params['statDateTrade']['statDates'])
+    tempDf['up_his_show_perday'] = tempDf['up_his_show'] / (tempDf.index.get_level_values('date')-startDate).days
+    df = df.merge(tempDf, how='left', left_on=['user_id','item_price_level','date'], right_index=True)
     df['up_his_show_ratio'] = biasSmooth(df.up_his_show.values, df.user_his_show.values)
-    df.fillna({k:0 for k in ['up_his_show','up_his_trade','up_his_show_ratio']}, inplace=True)
     return df
 
-def addItemCateFea(df, hisDf=None):
-    if isinstance(hisDf, pd.DataFrame):
-        originDf = pd.concat([hisDf,df], ignore_index=True)
-    else:
+# 统计用户该价格段商品的统计特征
+def addUserHourFea(df, originDf=None, **params):
+    if not isinstance(originDf, pd.DataFrame):
+        originDf = df.copy()
+    tempDf = statDateTrade(originDf, ['user_id','hour2'], **params['statDateTrade'])
+    tempDf.columns = ['uh_his_show','uh_his_trade']
+    tempDf['uh_his_trade_ratio'] = biasSmooth(tempDf.uh_his_trade.values, tempDf.uh_his_show.values)
+    startDate = pd.to_datetime('2018-09-17')
+    startDate += timedelta(days=params['statDateTrade']['skipDates']) if params['statDateTrade']['statDates']==None else timedelta(days=params['statDateTrade']['statDates'])
+    tempDf['uh_his_show_perday'] = tempDf['uh_his_show'] / (tempDf.index.get_level_values('date')-startDate).days
+    df = df.merge(tempDf, how='left', left_on=['user_id','hour2','date'], right_index=True)
+    df['uh_his_show_ratio'] = biasSmooth(df.uh_his_show.values, df.user_his_show.values)
+    df.fillna({k:0 for k in ['uh_his_show','uh_his_trade','uh_his_show_ratio']}, inplace=True)
+    return df
+
+def addItemCateFea(df, originDf=None, **params):
+    if not isinstance(originDf, pd.DataFrame):
         originDf = df.copy()
     df['ic_price_delta'] = df['item_price_level'] - df['cate_price_mean']
     df['ic_sales_delta'] = df['item_sales_level'] - df['cate_sales_mean']
     # df['ic_trade_ratio_delta'] = df['item_his_trade_ratio'] - df['cate_his_trade_ratio']
     return df
 
-def addItemShopFea(df, hisDf=None):
-    if isinstance(hisDf, pd.DataFrame):
-        originDf = pd.concat([hisDf,df], ignore_index=True)
-    else:
+def addItemShopFea(df, originDf=None, **params):
+    if not isinstance(originDf, pd.DataFrame):
         originDf = df.copy()
-    itemDf = originDf.drop_duplicates(['item_id'])
-    tempDf = pd.pivot_table(itemDf, index=['shop_id'], values=['item_sales_level','item_collected_level','item_pv_level'], aggfunc=np.mean)
-    tempDf.columns = ['item_collected_level_mean','item_pv_level_mean','item_sales_level_mean']
-    itemDf = itemDf.merge(tempDf, how='left', left_on=['shop_id'], right_index=True)
-    itemDf['is_sales_delta'] = itemDf['item_sales_level'] - itemDf['item_sales_level_mean']
-    itemDf['is_collected_delta'] = itemDf['item_collected_level'] - itemDf['item_collected_level_mean']
-    itemDf['is_pv_delta'] = itemDf['item_pv_level'] - itemDf['item_pv_level_mean']
-    df = df.merge(itemDf[['item_id','is_sales_delta','is_collected_delta','is_pv_delta']], how='left', on=['item_id'])
+    df['is_sales_delta'] = df['item_sales_level'] - df['shop_sales_mean']
+    df['is_collected_delta'] = df['item_collected_level'] - df['shop_collected_mean']
+    df['is_pv_delta'] = df['item_pv_level'] - df['shop_pv_mean']
     return df
 
-def addItemAgeFea(df, hisDf=None):
-    if isinstance(hisDf, pd.DataFrame):
-        originDf = pd.concat([hisDf,df], ignore_index=True)
-    else:
+def addItemAgeFea(df, originDf=None, **params):
+    if not isinstance(originDf, pd.DataFrame):
         originDf = df.copy()
     tempDf = pd.pivot_table(originDf, index=['item_id'], values=['user_age_level'], aggfunc=[np.mean, np.std])
     tempDf.columns = ['item_age_mean','item_age_std']
@@ -484,10 +434,8 @@ def addItemAgeFea(df, hisDf=None):
     df['item_age_delta'] = df['user_age_level'] - df['item_age_mean']
     return df
 
-def addItemGenderFea(df, hisDf=None):
-    if isinstance(hisDf, pd.DataFrame):
-        originDf = pd.concat([hisDf,df], ignore_index=True)
-    else:
+def addItemGenderFea(df, originDf=None, **params):
+    if not isinstance(originDf, pd.DataFrame):
         originDf = df.copy()
     startTime = datetime.now()
     tempDf = pd.crosstab(originDf['item_id'], originDf['user_gender_id'], margins=True)
@@ -500,10 +448,8 @@ def addItemGenderFea(df, hisDf=None):
     df.drop(['item_gender0_ratio','item_gender0_ratio_delta','item_gender1_ratio','item_gender1_ratio_delta','item_gender2_ratio','item_gender2_ratio_delta'],axis=1, inplace=True)
     return df
 
-def addCateAgeFea(df, hisDf=None):
-    if isinstance(hisDf, pd.DataFrame):
-        originDf = pd.concat([hisDf,df], ignore_index=True)
-    else:
+def addCateAgeFea(df, originDf=None, **params):
+    if not isinstance(originDf, pd.DataFrame):
         originDf = df.copy()
     tempDf = pd.pivot_table(originDf, index=['item_category1'], values=['user_age_level'], aggfunc=[np.mean, np.std])
     tempDf.columns = ['cate_age_mean','cate_age_std']
@@ -511,10 +457,8 @@ def addCateAgeFea(df, hisDf=None):
     df['cate_age_delta'] = df['user_age_level'] - df['cate_age_mean']
     return df
 
-def addCateGenderFea(df, hisDf=None):
-    if isinstance(hisDf, pd.DataFrame):
-        originDf = pd.concat([hisDf,df], ignore_index=True)
-    else:
+def addCateGenderFea(df, originDf=None, **params):
+    if not isinstance(originDf, pd.DataFrame):
         originDf = df.copy()
     startTime = datetime.now()
     tempDf = pd.crosstab(originDf['item_category1'], originDf['user_gender_id'], margins=True)
@@ -527,10 +471,8 @@ def addCateGenderFea(df, hisDf=None):
     df.drop(['cate_gender0_ratio','cate_gender0_ratio_delta','cate_gender1_ratio','cate_gender1_ratio_delta','cate_gender2_ratio','cate_gender2_ratio_delta'],axis=1, inplace=True)
     return df
 
-def addShopAgeFea(df, hisDf=None):
-    if isinstance(hisDf, pd.DataFrame):
-        originDf = pd.concat([hisDf,df], ignore_index=True)
-    else:
+def addShopAgeFea(df, originDf=None, **params):
+    if not isinstance(originDf, pd.DataFrame):
         originDf = df.copy()
     tempDf = pd.pivot_table(originDf, index=['shop_id'], values=['user_age_level'], aggfunc=[np.mean, np.std])
     tempDf.columns = ['shop_age_mean','shop_age_std']
@@ -538,10 +480,8 @@ def addShopAgeFea(df, hisDf=None):
     df['shop_age_delta'] = df['user_age_level'] - df['shop_age_mean']
     return df
 
-def addShopGenderFea(df, hisDf=None):
-    if isinstance(hisDf, pd.DataFrame):
-        originDf = pd.concat([hisDf,df], ignore_index=True)
-    else:
+def addShopGenderFea(df, originDf=None, **params):
+    if not isinstance(originDf, pd.DataFrame):
         originDf = df.copy()
     startTime = datetime.now()
     tempDf = pd.crosstab(originDf['shop_id'], originDf['user_gender_id'], margins=True)
@@ -554,13 +494,11 @@ def addShopGenderFea(df, hisDf=None):
     df.drop(['shop_gender0_ratio','shop_gender0_ratio_delta','shop_gender1_ratio','shop_gender1_ratio_delta','shop_gender2_ratio','shop_gender2_ratio_delta'],axis=1, inplace=True)
     return df
 
-def addBrandCateFea(df, hisDf=None):
-    if isinstance(hisDf, pd.DataFrame):
-        originDf = pd.concat([hisDf,df], ignore_index=True)
-    else:
+def addBrandCateFea(df, originDf=None, **params):
+    if not isinstance(originDf, pd.DataFrame):
         originDf = df.copy()
-    df['bc_sales_delta'] = df['brand_sales_level'] - df['cate_sales_mean']
-    df['bc_collected_delta'] = df['brand_colleted_level'] - df['cate_collected_mean']
+    df['bc_sales_delta'] = df['brand_sales_mean'] - df['cate_sales_mean']
+    df['bc_collected_delta'] = df['brand_colleted_mean'] - df['cate_collected_mean']
     return df
 
 class XgbModel:
@@ -570,7 +508,7 @@ class XgbModel:
             'objective': 'binary:logistic',
             'eval_metric':'logloss',
             'silent': True,
-            'eta': 0.1,
+            'eta': 0.05,
             'max_depth': 4,
             'gamma': 0.5,
             'subsample': 0.95,
@@ -671,30 +609,40 @@ class XgbModel:
         return scoreDf
 
 # 特征方法汇总
-def feaFactory(df, hisDf=None):
+def feaFactory(df, originDf=None, **args):
+    params = {
+        'statDateTrade': {
+            'statDates': None,
+            'skipDates': 1,
+        }
+    }
+    for k1,arg in args.items():
+        for k2,v in arg.items():
+            params[k1][k2] = v
     startTime = datetime.now()
     df = formatDf(df)
     df = splitMultiFea(df)
     df = combineKey(df)
-    df = addTimeFea(df)
-    df = addCateFea(df, hisDf)
-    df = addUserFea(df, hisDf)
-    df = addShopFea(df, hisDf)
-    df = addItemFea(df, hisDf)
-    df = addContextFea(df)
-    df = addBrandFea(df,hisDf)
-    df = addUserCateFea(df, hisDf)
-    df = addUserItemFea(df, hisDf)
-    df = addUserPriceFea(df, hisDf)
-    df = addItemCateFea(df, hisDf)
-    df = addItemShopFea(df, hisDf)
-    df = addItemAgeFea(df, hisDf)
-    df = addItemGenderFea(df, hisDf)
-    df = addCateAgeFea(df, hisDf)
-    df = addCateGenderFea(df, hisDf)
-    df = addShopAgeFea(df, hisDf)
-    df = addShopGenderFea(df, hisDf)
-    df = addBrandCateFea(df, hisDf)
+    df = addTimeFea(df, **params)
+    df = addCateFea(df, originDf, **params)
+    df = addUserFea(df, originDf, **params)
+    df = addShopFea(df, originDf, **params)
+    df = addItemFea(df, originDf, **params)
+    df = addContextFea(df, **params)
+    df = addBrandFea(df,originDf, **params)
+    df = addUserCateFea(df, originDf, **params)
+    df = addUserItemFea(df, originDf, **params)
+    df = addUserPriceFea(df, originDf, **params)
+    df = addUserHourFea(df, originDf, **params)
+    df = addItemCateFea(df, originDf, **params)
+    df = addItemShopFea(df, originDf, **params)
+    df = addItemAgeFea(df, originDf, **params)
+    df = addItemGenderFea(df, originDf, **params)
+    df = addCateAgeFea(df, originDf, **params)
+    df = addCateGenderFea(df, originDf, **params)
+    df = addShopAgeFea(df, originDf, **params)
+    df = addShopGenderFea(df, originDf, **params)
+    df = addBrandCateFea(df, originDf, **params)
     print('finished feaFactory: ', datetime.now() - startTime)
     return df
 
@@ -742,12 +690,19 @@ def getOof(clf, trainX, trainY, testX, nFold=5, stratify=False):
 if __name__ == '__main__':
     # 导入数据
     df = importDf('../data/round1_ijcai_18_train_20180301.txt')
+    predictDf = importDf('../data/round1_ijcai_18_test_a_20180301.txt')
 
     # 特征处理
-    df = feaFactory(df)
+    df.drop_duplicates(inplace=True)
+    originDf = pd.concat([df,predictDf], ignore_index=True)
+    originDf['is_trade'].fillna(0, inplace=True)
+    startIdx = len(df)
+    originDf = feaFactory(originDf)
+    df = originDf.loc[:startIdx]
+    predictDf = originDf.loc[startIdx:]
 
     # 特征筛选
-    tempCol = ['brand_colleted_level','brand_item_count','brand_sales_level','bc_sales_delta','bc_collected_delta']
+    tempCol = ['user_his_show_perday','item_his_show_perday','shop_his_show_perday','cate_his_show_perday','brand_his_show_perday','uc_his_show_perday','up_his_show_perday','uh_his_show','uh_his_show_perday','uh_his_trade_ratio','uh_his_show_ratio',]
     resultDf = getFeaScore(df.dropna(subset=tempCol)[tempCol].values, df.dropna(subset=tempCol)['is_trade'].values, tempCol)
     print(resultDf[resultDf.scores>0])
     print(df[tempCol].describe())
@@ -755,24 +710,31 @@ if __name__ == '__main__':
         'item_category1','item_city_id', 'item_sales_level','item_collected_level','item_price_level',#'item_id','item_category2',
         'user_gender_id','user_age_level','user_star_level',#'user_id',
         'hour','context_page_id',#'hour2',
-        'shop_review_positive_rate','shop_score_service','shop_score_delivery','shop_score_description',
-        'shop_his_show','shop_his_trade','shop_his_trade_ratio','shop_score_service_delta','shop_score_delivery_delta','shop_score_description_delta','shop_review_positive_delta','shop_collected_level','shop_pv_level','shop_item_count','shop_sales_level',#'shop_id',
-        'cate_his_show','cate_his_trade','cate_his_trade_ratio','cate_price_mean','cate_sales_mean',
+        'shop_review_positive_rate','shop_score_service','shop_score_delivery','shop_score_description',#'shop_id',
+
         'user_his_show','user_his_trade_ratio','user_last_show_timedelta','user_lasthour_show',#'user_his_trade',
-        'item_his_show','item_his_trade','item_his_trade_ratio','item_his_show_ratio','item_prop_num',
-        'has_predict_cate_num','has_predict_prop_num','has_predict_category',
-        'brand_colleted_level','brand_item_count','brand_sales_level',
-        'ic_sales_delta','ic_price_delta',#'ic_trade_ratio_delta',
-        # 'is_sales_delta','is_pv_delta',#'is_collected_delta',
-        'item_age_std','item_age_delta',#'item_age_mean',
+        'item_his_show','item_his_trade','item_his_trade_ratio','item_his_show_ratio','item_prop_num',#,'item_his_show_perday'
+        'item_age_std','item_age_delta','item_age_mean',
         'item_gender_ratio','item_gender_ratio_delta',
-        'ui_last_show_timedelta','ui_lasthour_show_ratio',#'ui_lasthour_show',#'ui_lastdate_show','ui_lastdate_trade',
-        'uc_last_show_timedelta','uc_lasthour_show','uc_his_show','uc_his_trade_ratio','uc_his_show_ratio',# 'uc_his_trade',
-        'up_his_show_ratio','up_his_show',#'up_his_trade',
-        'cate_age_delta','cate_age_mean','cate_age_std',
-        'cate_gender_ratio','cate_gender_ratio_delta',
+        'shop_his_show','shop_his_trade_ratio',#'shop_his_trade',
         'shop_age_std','shop_age_delta','shop_age_mean',
         'shop_gender_ratio','shop_gender_ratio_delta',
+        'shop_collected_mean','shop_collected_sum','shop_price_mean','shop_price_sum','shop_pv_mean','shop_pv_sum','shop_sales_mean','shop_sales_sum','shop_item_count',
+        'shop_score_service_delta','shop_score_delivery_delta','shop_score_description_delta','shop_review_positive_delta',
+        'cate_his_show','cate_his_trade_ratio',#'cate_his_trade','cate_his_show_perday',
+        'cate_age_delta','cate_age_mean','cate_age_std',
+        'cate_gender_ratio','cate_gender_ratio_delta',
+        'cate_collected_mean','cate_collected_sum','cate_price_mean','cate_price_sum','cate_pv_mean','cate_pv_sum','cate_item_count','cate_sales_mean','cate_sales_sum',
+        # 'brand_his_show','brand_his_show_perday','brand_his_trade_ratio',#'brand_his_trade',
+        'brand_colleted_mean','brand_colleted_sum','brand_item_count','brand_sales_mean','brand_sales_sum',
+        'has_predict_cate_num','has_predict_prop_num','has_predict_category',
+
+        'ic_sales_delta','ic_price_delta',#'ic_trade_ratio_delta',
+        # 'is_sales_delta','is_pv_delta','is_collected_delta',
+        'ui_last_show_timedelta','ui_lasthour_show_ratio','ui_lasthour_show',#'ui_lastdate_show','ui_lastdate_trade',
+        'uc_last_show_timedelta','uc_lasthour_show','uc_his_show','uc_his_trade_ratio','uc_his_show_ratio',# 'uc_his_trade',
+        'up_his_show_ratio','up_his_show',#'up_his_trade',
+        # 'uh_his_show','uh_his_show_perday','uh_his_trade_ratio','uh_his_show_ratio',
         'bc_sales_delta','bc_collected_delta',
     ]
     print(df[fea].info())
@@ -781,10 +743,10 @@ if __name__ == '__main__':
     # 测试模型效果
     costDf = pd.DataFrame(index=fea+['cost','oof_cost'])
     xgbModel = XgbModel(feaNames=fea)
-    for dt in pd.date_range(start='2018-09-21', end='2018-09-23', freq='D'):
-        trainDf, testDf = trainTestSplit(df, dt, trainPeriod=7)
+    for dt in pd.date_range(start='2018-09-23', end='2018-09-24', freq='D'):
+        trainDf, testDf = trainTestSplit(df, dt, trainPeriod=4)
         # xgbModel.gridSearch(trainDf[fea].values, trainDf['is_trade'].values)
-        xgbModel.trainCV(trainDf[fea].values, trainDf['is_trade'].values)
+        xgbModel.trainCV(trainDf[fea].values, trainDf['is_trade'].values, nFold=3)
         testDf.loc[:,'predict'] = xgbModel.predict(testDf[fea].values)
         # _,testDf.loc[:,'oof_predict'] = getOof(xgbModel, trainDf[fea].values, trainDf['is_trade'].values, testDf[fea].values, stratify=True)
         scoreDf = xgbModel.getFeaScore()
@@ -793,31 +755,24 @@ if __name__ == '__main__':
         cost = metrics.log_loss(testDf['is_trade'].values, testDf['predict'].values)
         costDf.loc['cost',dt.strftime('%Y-%m-%d')] = cost
         # costDf.loc['oof_cost',dt.strftime('%Y-%m-%d')] = metrics.log_loss(testDf['is_trade'].values, testDf['oof_predict'].values)
-    print(costDf)
+    print(costDf.iloc[:50], costDf.iloc[50:])
     exit()
 
     # 正式模型
     modelName = "xgboost1A"
+    df = df[df.context_timestamp>='2018-09-19']
     xgbModel.trainCV(df[fea].values, df['is_trade'].values)
     xgbModel.getFeaScore(show=True)
     xgbModel.clf.save_model('%s.model'%modelName)
 
     # 预测集准备
     startTime = datetime.now()
-    predictDf = importDf('../data/round1_ijcai_18_test_a_20180301.txt')
-    predictDf = feaFactory(predictDf, hisDf=df)
-    # 填补缺失字段
-    print('缺失字段：', [x for x in fea if x not in predictDf.columns])
-    for x in [x for x in fea if x not in predictDf.columns]:
-        predictDf[x] = 0
-    print("预测集：\n",predictDf.head())
     print(predictDf[fea].info())
 
     # 开始预测
     predictDf.loc[:,'predicted_score'] = xgbModel.predict(predictDf[fea].values)
     print("预测结果：\n",predictDf[['instance_id','predicted_score']].head())
     print('预测均值：', predictDf['predicted_score'].mean())
-    # exportResult(predictDf, "%s_predict.csv" % modelName)
     exportResult(predictDf[['instance_id','predicted_score']], "%s.txt" % modelName)
 
     # 生成stacking数据集
@@ -826,4 +781,3 @@ if __name__ == '__main__':
     df.loc[:,'predicted_score'], predictDf.loc[:,'predicted_score'] = getOof(xgbModel, df[fea].values, df['is_trade'].values, predictDf[fea].values, stratify=True)
     exportResult(df[['instance_id','predicted_score']], "%s_oof_train.csv" % modelName)
     exportResult(predictDf[['instance_id','predicted_score']], "%s_oof_test.csv" % modelName)
-    # exportResult(predictDf[['instance_id','predicted_score']], "%s.txt" % modelName)
