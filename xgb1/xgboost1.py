@@ -33,15 +33,14 @@
       品牌历史转化率，
       上下文预测类目个数，上下文是否包含该商品类目，上下文中该类目的预测属性个数，上下文属性与商品属性交集的数量等级，上下文属性与商品属性的杰卡森相似度
 
-      用户距离上次浏览该商品的时长，用户过去一小时浏览该商品的次数占同类商品的比重
-      用户距离上次浏览该类别的时长，用户过去一小时浏览该类别的比重，用户在该类别的历史转化率，用户浏览该类别次数占用户历史浏览的比重
-      用户浏览该类别的价格均值，该商品价位与用户浏览该类别的价格均值之差
-      用户在该价位的历史转化率，用户在该价位的浏览比例
-      商品在该年龄段的浏览比例，商品在该年龄段的转化率，商品在该年龄段的浏览比例与类别在该年龄段的浏览比例之差
-      商品在该性别的浏览比例，商品在该性别的转化率，商品在该性别的浏览比例与类别在该性别的浏览比例之差
+      用户距离上次浏览该商品的时长，用户过去一小时浏览该商品次数，用户前一天浏览该商品次数
+      用户距离上次浏览该类别的时长，用户过去一小时浏览该类别的次数
+      用户浏览该类别的价格均值，该商品价位与用户浏览该类别的平均价格之差
+      商品在该年龄段的转化率，商品在该年龄段的转化率与同类之差
+      商品在该性别的转化率，商品在该性别的转化率与同类之差
 
-      用户距离下次点击时长，用户距离下次点击该类别的时长，用户距离下次点击该商品的时长
-结果： B榜（0.08495）
+      用户距离下次点击时长，用户距离下次点击该商品的时长，用户距前后两次点击时长的差值
+结果： B榜（0.08488）
 
 '''
 
@@ -388,6 +387,7 @@ def addUserFea(df, originDf=None, **params):
     tempDf['user_next_show_timedelta'] = tempDf['next_show_time'] - tempDf['context_timestamp']
     tempDf['user_next_show_timedelta'] = tempDf['user_next_show_timedelta'].dt.seconds
     tempDf['user_next_show_timedelta'].fillna(999999, inplace=True)
+    tempDf['user_near_timedelta'] = tempDf['user_next_show_timedelta'] - tempDf['user_last_show_timedelta']
     hourShowList = []
     hourShowTemp = {}
     for same, dt, show in tempDf[['last_user_id','context_timestamp','show']].values:
@@ -399,7 +399,7 @@ def addUserFea(df, originDf=None, **params):
             hourShowList.append(0)
             hourShowTemp = {dt:show}
     tempDf['user_lasthour_show'] = hourShowList
-    df = df.merge(tempDf[['user_id','context_timestamp','user_last_show_timedelta','user_next_show_timedelta','user_lasthour_show']], how='left', on=['user_id','context_timestamp'])
+    df = df.merge(tempDf[['user_id','context_timestamp','user_last_show_timedelta','user_next_show_timedelta','user_near_timedelta','user_lasthour_show']], how='left', on=['user_id','context_timestamp'])
 
     tempDf = pd.pivot_table(df, index=['user_id','date'], values=['is_trade'], aggfunc=len)
     tempDf.columns = ['user_lastdate_show']
@@ -482,6 +482,7 @@ def addUserCateFea(df, originDf=None, **params):
     tempDf['uc_next_show_timedelta'] = tempDf['next_time'] - tempDf['context_timestamp']
     tempDf['uc_next_show_timedelta'] = tempDf['uc_next_show_timedelta'].dt.seconds
     tempDf['uc_next_show_timedelta'].fillna(999999, inplace=True)
+    tempDf['uc_near_timedelta'] = tempDf['uc_next_show_timedelta'] - tempDf['uc_last_show_timedelta']
     hourShowList = []
     hourShowTemp = {}
     priceList = []
@@ -501,8 +502,9 @@ def addUserCateFea(df, originDf=None, **params):
     tempDf['uc_lasthour_show'] = hourShowList
     tempDf['uc_price_mean'] = priceList
     tempDf['uc_price_mean'] = tempDf.loc[tempDf.uc_price_mean.notnull(),'uc_price_mean'].map(lambda x: np.mean(x))
-    df = df.merge(tempDf[['user_id','item_category1','context_timestamp','uc_last_show_timedelta','uc_next_show_timedelta','uc_lasthour_show','uc_price_mean']], how='left', on=['user_id','item_category1','context_timestamp'])
-    df['uc_lasthour_show_ratio'] = biasSmooth(df.uc_lasthour_show.values, df.user_lasthour_show.values)
+    df = df.merge(tempDf[['user_id','item_category1','context_timestamp','uc_last_show_timedelta','uc_next_show_timedelta','uc_near_timedelta','uc_lasthour_show','uc_price_mean']], how='left', on=['user_id','item_category1','context_timestamp'])
+    df['uc_lasthour_show'].fillna(0, inplace=True)
+    # df['uc_lasthour_show_ratio'] = biasSmooth(df.uc_lasthour_show.values, df.user_lasthour_show.values)
     df['uc_price_delta'] = df['item_price_level'] - df['uc_price_mean']
 
     tempDf = statDateTrade(originDf, ['user_id','item_category1'], **params['statDateTrade'])
@@ -512,9 +514,9 @@ def addUserCateFea(df, originDf=None, **params):
     startDate += timedelta(days=params['statDateTrade']['skipDates']) if params['statDateTrade']['statDates']==None else timedelta(days=params['statDateTrade']['statDates'])
     tempDf['uc_his_show_perday'] = tempDf['uc_his_show'] / (tempDf.index.get_level_values('date')-startDate).days
     df = df.merge(tempDf, how='left', left_on=['user_id','item_category1','date'], right_index=True)
-    for x in set(df.item_category1.dropna().values):
-        idx = df[df.item_category1==x].index
-        df.loc[idx, 'uc_his_show_ratio'] = biasSmooth(df.loc[idx, 'uc_his_show'].values, df.loc[idx,'user_his_show'].values)
+    # for x in set(df.item_category1.dropna().values):
+    #     idx = df[df.item_category1==x].index
+    #     df.loc[idx, 'uc_his_show_ratio'] = biasSmooth(df.loc[idx, 'uc_his_show'].values, df.loc[idx,'user_his_show'].values)
     return df
 
 # 添加用户商品关联维度的特征
@@ -552,14 +554,14 @@ def addUserItemFea(df, originDf=None, **params):
             hourShowTemp = {dt:show}
     tempDf['ui_lasthour_show'] = hourShowList
     df = df.merge(tempDf[['user_item','context_timestamp','ui_last_show_timedelta','ui_next_show_timedelta','ui_lasthour_show']], how='left', on=['user_item','context_timestamp'])
-    df['ui_lasthour_show_ratio'] = biasSmooth(df.ui_lasthour_show.values, df.uc_lasthour_show.values)
+    # df['ui_lasthour_show_ratio'] = biasSmooth(df.ui_lasthour_show.values, df.uc_lasthour_show.values)
 
     tempDf = pd.pivot_table(originDf, index=['user_item','date'], values=['is_trade'], aggfunc=[len,np.sum])
     tempDf.columns = ['ui_lastdate_show', 'ui_lastdate_trade']
     tempDf.reset_index(inplace=True)
     tempDf['date'] = tempDf['date'] + timedelta(days=1)
     df = df.merge(tempDf[['user_item','date','ui_lastdate_show', 'ui_lastdate_trade']], how='left', on=['user_item','date'])
-    df.fillna({k:0 for k in ['ui_lastdate_show', 'ui_lastdate_trade']}, inplace=True)
+    df.fillna({k:0 for k in ['ui_lastdate_show', 'ui_lastdate_trade','ui_lasthour_show']}, inplace=True)
     return df
 
 # 统计用户该价格段商品的统计特征
@@ -626,7 +628,7 @@ def addCateCrossFea(df, **params):
     df = df.merge(tempDf, how='left', left_on=['item_category1','user_gender_id','date'], right_index=True)
     for x in set(df.user_age_level.dropna().values):
         idx = df[df.user_age_level==x].index
-        df.loc[idx, 'cg_his_show_ratio'] = biasSmooth(df.loc[idx, 'ca_his_show'].values, df.loc[idx,'cate_his_show'].values)
+        df.loc[idx, 'cg_his_show_ratio'] = biasSmooth(df.loc[idx, 'cg_his_show'].values, df.loc[idx,'cate_his_show'].values)
     return df
 
 # 统计商品与各类别用户群交叉特征
@@ -639,6 +641,7 @@ def addItemCrossFea(df, **params):
         idx = df[df.user_age_level==x].index
         df.loc[idx, 'ia_his_show_ratio'] = biasSmooth(df.loc[idx, 'ia_his_show'].values, df.loc[idx,'item_his_show'].values)
     df['ia_his_show_delta'] = df['ia_his_show_ratio'] - df['ca_his_show_ratio']
+    df['ia_his_trade_delta'] = df['ia_his_trade_ratio'] - df['ca_his_trade_ratio']
 
     tempDf = statDateTrade(df, ['item_id','user_gender_id'], **params['statDateTrade'])
     tempDf.columns = ['ig_his_show','ig_his_trade']
@@ -648,6 +651,7 @@ def addItemCrossFea(df, **params):
         idx = df[df.user_gender_id==x].index
         df.loc[idx, 'ig_his_show_ratio'] = biasSmooth(df.loc[idx, 'ig_his_show'].values, df.loc[idx,'item_his_show'].values)
     df['ig_his_show_delta'] = df['ig_his_show_ratio'] - df['cg_his_show_ratio']
+    df['ig_his_trade_delta'] = df['ig_his_trade_ratio'] - df['cg_his_trade_ratio']
     return df
 
 # 统计品牌与各类别用户群交叉特征
@@ -680,7 +684,7 @@ class XgbModel:
             'objective': 'binary:logistic',
             'eval_metric':'logloss',
             'silent': True,
-            'eta': 0.1,
+            'eta': 0.05,
             'max_depth': 4,
             'gamma': 0.5,
             'subsample': 0.95,
@@ -811,11 +815,11 @@ def feaFactory(df, originDf=None, **args):
     df = addBrandFea(df,originDf, **params)
     df = addUserCateFea(df, originDf, **params)
     df = addUserItemFea(df, originDf, **params)
-    df = addUserShopFea(df, originDf, **params)
-    df = addUserPriceFea(df, originDf, **params)
-    df = addUserHourFea(df, originDf, **params)
+    # df = addUserShopFea(df, originDf, **params)
+    # df = addUserPriceFea(df, originDf, **params)
+    # df = addUserHourFea(df, originDf, **params)
     df = addCateCrossFea(df, **params)
-    df = addBrandCrossFea(df, **params)
+    # df = addBrandCrossFea(df, **params)
     df = addItemCrossFea(df, **params)
     print('finished feaFactory: ', datetime.now() - startTime)
     return df
@@ -913,19 +917,20 @@ if __name__ == '__main__':
         'predict_cate_num_level','is_predict_category','predict_prop_num_level','prop_intersect_num_level','prop_jaccard',
         # 'hour_his_trade_ratio',
 
-        'ui_last_show_timedelta','ui_lasthour_show_ratio',#'ui_lasthour_show',#'ui_lastdate_trade',#'ui_lastdate_show',
-        'uc_his_trade_ratio','uc_last_show_timedelta','uc_his_show_ratio','uc_lasthour_show_ratio',# 'uc_his_trade','uc_his_show','uc_lasthour_show',
+        'ui_last_show_timedelta','ui_lasthour_show','ui_lastdate_show',#'ui_lasthour_show_ratio','ui_lastdate_trade',
+        'uc_last_show_timedelta','uc_lasthour_show',# 'uc_his_trade','uc_his_show','uc_his_trade_ratio','uc_his_show_ratio','uc_lasthour_show_ratio',
         'uc_price_mean','uc_price_delta',
-        'up_his_trade_ratio','up_his_show_ratio',#'up_his_trade','up_his_show',
-        # 'us_his_trade',# 'us_his_trade_ratio','us_his_show',#'us_his_show_perday',
-        # 'uh_his_show_ratio',#'uh_his_trade_ratio','uh_his_show',#'uh_his_show_perday',
-        'ia_his_show_ratio','ia_his_trade_ratio','ia_his_show_delta',
-        'ig_his_show_ratio','ig_his_trade_ratio','ig_his_show_delta',
-        # 'ba_his_show_ratio','ba_his_trade_ratio','ba_his_show_delta',
-        # 'bg_his_show_ratio','bg_his_trade_ratio','bg_his_show_delta',
-        # 'bc_sales_delta','bc_collected_delta',
+        # 'up_his_trade_ratio','up_his_show_ratio',#'up_his_trade','up_his_show',
+        # # 'us_his_trade',# 'us_his_trade_ratio','us_his_show',#'us_his_show_perday',
+        # # 'uh_his_show_ratio',#'uh_his_trade_ratio','uh_his_show',#'uh_his_show_perday',
+        # 'ca_his_trade_ratio','cg_his_trade_ratio',
+        'ia_his_trade_ratio','ia_his_trade_delta',#'ia_his_show_delta','ia_his_show_ratio',
+        'ig_his_trade_ratio','ig_his_trade_delta',#'ig_his_show_delta','ig_his_show_ratio',
+        # # 'ba_his_show_ratio','ba_his_trade_ratio','ba_his_show_delta',
+        # # 'bg_his_show_ratio','bg_his_trade_ratio','bg_his_show_delta',
+        # # 'bc_sales_delta','bc_collected_delta',
 
-        'user_next_show_timedelta','uc_next_show_timedelta','ui_next_show_timedelta',
+        'user_next_show_timedelta','ui_next_show_timedelta','user_near_timedelta',#'uc_near_timedelta','uc_next_show_timedelta',
     ]
     print(df[fea].info())
 
