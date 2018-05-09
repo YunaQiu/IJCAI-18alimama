@@ -38,16 +38,17 @@
       品牌商品数目
       小时转化率，上下文预测类目个数，上下文预测类目与商品类目交集个数，上下文属性与商品属性交集的数目，上下文预测属性个数，
 
-      用户在该类目的历史转化率，用户在该类目过去一小时点击数，
-      用户在该类别的价格均值
+      用户距离上次点击该商品时长，用户过去一小时点击该商品次数，用户前一天点击该商品次数，用户过去一小时点击该商品与点击该类目次数的比例，
+      用户在该类目的历史转化率
+      用户在该类别的价格均值，商品价格与用户在该类目价格均值的差值
       类目在该年龄段的转化率，类目在该性别的转化率
       商品在该年龄段的转化率，商品在该年龄段的转化率与同类之差
       商品在该性别的转化率，商品在该性别的转化率与同类之差
 
-      用户距离下次点击时长，用户未来一小时点击量，用户在该类目前后一小时点击量差值
+      用户距离下次点击时长，用户未来一小时点击量，用户前后两次点击时长的差值，用户前后一小时点击量差值，用户在该类目前后一小时点击量差值，用户在该类目前后两次点击时长差值，用户距离下次点击该类目时长
 前期处理：采用全部数据集做统计，只用7号上午的做训练
 后期处理：根据普通日期曲线与特殊日期曲线估算出7号下午每小时的转化率，将训练结果各小时的转化率调整至估算的转化率
-结果： A榜（0.1442）
+结果： A榜（0.14376）
 
 '''
 
@@ -253,6 +254,18 @@ def dataCleaning(df):
     print('cleaning time:', datetime.now()-startTime)
     return df
 
+# 特征工程
+def feaFactory(df):
+    df.loc[(df.user_last_show_timedelta==999999)&(df.user_next_show_timedelta<999999),'user_near_timedelta'] = -999999
+    df.loc[(df.user_last_show_timedelta<999999)&(df.user_next_show_timedelta==999999),'user_near_timedelta'] = 999999
+    df.loc[(df.user_last_show_timedelta==999999)&(df.user_next_show_timedelta==999999),'user_near_timedelta'] = np.nan
+    df.loc[(df.user_lasthour_show==0)&(df.user_nexthour_show==0),'user_nearhour_show_delta'] = np.nan
+    df.loc[(df.uc_last_show_timedelta==999999)&(df.uc_next_show_timedelta<999999),'uc_near_timedelta'] = -999999
+    df.loc[(df.uc_last_show_timedelta<999999)&(df.uc_next_show_timedelta==999999),'uc_near_timedelta'] = 999999
+    df.loc[(df.uc_last_show_timedelta==999999)&(df.uc_next_show_timedelta==999999),'uc_near_timedelta'] = np.nan
+    df.loc[(df.uc_lasthour_show==0)&(df.uc_nexthour_show==0), 'uc_nearhour_show_delta'] = np.nan
+    return df
+
 # 划分训练集和测试集
 def trainTestSplit(df, splitDate=pd.to_datetime('2018-09-23'), trainPeriod=3, testPeriod=1):
     trainDf = df[(df.context_timestamp<splitDate)&(df.context_timestamp>=splitDate-timedelta(days=trainPeriod))]
@@ -297,13 +310,12 @@ if __name__ == '__main__':
     predictDf = importDf('../data/test_fea.csv')
     predictDf['dataset'] = -1
     originDf = pd.concat([df,predictDf], ignore_index=True)
-    # originDf = originDf.sample(frac=0.05)
     print('prepare dataset time:', datetime.now()-startTime)
 
     # 特征处理
     startTime = datetime.now()
     originDf = dataCleaning(originDf)
-    # originDf = feaFactory(originDf)
+    originDf = feaFactory(originDf)
     # idx = originDf.date=='2018-09-07'
     # originDf.loc[idx,'weight'] = 1
     # originDf.loc[~idx, 'weight'] = 1
@@ -314,9 +326,8 @@ if __name__ == '__main__':
     fea = [
         'item_sales_level','item_price_level','item_collected_level','item_pv_level',#'item_city_id','item_category1',
         'user_gender_id','user_age_level','user_occupation_id','user_star_level',
-        'context_page_id','hour',#'hour2',
+        'context_page_id','hour',
         'shop_review_positive_rate','shop_score_service','shop_score_delivery','shop_score_description','shop_star_level','shop_review_num_level',
-        # 'special_date_dist',
 
         'user_his_trade_ratio','user_last_show_timedelta','user_his_show','user_lasthour_show','user_lastdate_show','user_lastdate_trade_ratio',#'user_his_trade',
         'item_his_trade_ratio','item_prop_num','item_lastdate_trade','item_his_trade','item_lastdate_trade_ratio','item_lastdate_trade_delta','item_lastdate_trade_ratio_delta',#item_his_show','item_his_show_delta','item_his_show_perday','item_his_trade_perday','item_his_show_ratio','item_his_show_delta',
@@ -333,20 +344,21 @@ if __name__ == '__main__':
         'cate_age_delta',#'cate_age_std','cate_age_mean',
         # 'cate_gender_ratio_delta',#'cate_gender_ratio',
         'cate_sales_mean',#'cate_sales_sum','cate_collected_mean','cate_collected_sum','cate_price_sum','cate_pv_mean','cate_pv_sum','cate_item_count','cate_price_mean',
-        'brand_his_trade_ratio',#'brand_his_trade','brand_his_show','brand_his_show_perday',
-        'brand_item_count',#'brand_collected_mean','brand_collected_sum','brand_sales_mean','brand_sales_sum',
-        # 'brand_price_delta',#'brand_sales_delta','brand_collected_delta','brand_pv_delta',
+        'brand_his_trade_ratio',#'brand_lastdate_trade_ratio'#'brand_his_trade','brand_his_show','brand_his_show_perday',
+        'brand_item_count',
+        # 'brand_price_delta','brand_collected_delta','brand_sales_delta','brand_pv_delta',
+        # 'brand_age_delta',
         'hour_trade_ratio','predict_cate_num','cate_intersect_num','prop_intersect_num','predict_prop_num',#'prop_jaccard',
 
-        # 'ui_last_show_timedelta','ui_lasthour_show','ui_lastdate_show',#'ui_lasthour_show_ratio','ui_lastdate_trade',
-        'uc_his_trade_ratio','uc_lasthour_show',# 'uc_last_show_timedelta',# 'uc_his_trade','uc_his_show','uc_his_show_ratio','uc_lasthour_show_ratio',
-        'uc_price_mean',#'uc_price_delta',
+        'ui_last_show_timedelta','ui_lasthour_show','ui_lastdate_show','ui_lasthour_show_ratio',#'ui_lastdate_trade',
+        'uc_his_trade_ratio',# 'uc_last_show_timedelta',# 'uc_his_trade','uc_his_show','uc_his_show_ratio','uc_lasthour_show_ratio','uc_lasthour_show',
+        'uc_price_mean','uc_price_delta',
         # 'up_his_trade_ratio','up_his_show_ratio',#'up_his_trade','up_his_show',
         'ca_his_trade_ratio','cg_his_trade_ratio',
         'ia_his_trade_ratio','ia_his_trade_delta',#'ia_his_show_delta','ia_his_show_ratio',
         'ig_his_trade_ratio','ig_his_trade_delta',#'ig_his_show_delta','ig_his_show_ratio',
 
-        'user_next_show_timedelta','user_nexthour_show','uc_nearhour_show_delta',#'ui_next_show_timedelta','user_near_timedelta',##'uc_near_timedelta','uc_next_show_timedelta',
+        'user_next_show_timedelta','user_nexthour_show','user_near_timedelta','user_nearhour_show_delta','uc_nearhour_show_delta','uc_near_timedelta','uc_next_show_timedelta',#'ui_next_show_timedelta','user_near_timedelta',##
     ]
     print(df[fea].info())
     print(predictDf[fea].info())
@@ -354,8 +366,6 @@ if __name__ == '__main__':
 
     # 正式模型
     modelName = "xgboost2A"
-    exportResult(df[fea], "train_%s.txt"%modelName)
-    exportResult(predictDf[fea], "test_%s.txt"%modelName)
     startTime = datetime.now()
     xgbModel = XgbModel(feaNames=fea)
     xgbModel.trainCV(df[fea].values, df['is_trade'].values)#, weight=df['weight'].values
@@ -367,8 +377,8 @@ if __name__ == '__main__':
     predictDf.loc[:,'predicted_score'] = xgbModel.predict(predictDf[fea].values)
     print("预测结果：\n",predictDf[['instance_id','predicted_score']].head())
     print('预测均值：', predictDf['predicted_score'].mean())
-    # exportResult(predictDf[['instance_id','predicted_score']], "%s.txt" % modelName)
-    # exportResult(predictDf[['instance_id','predicted_score','hour']], "%s_hashour.txt" % modelName)
+    exportResult(predictDf[['instance_id','predicted_score']], "%s.txt" % modelName)
+    exportResult(predictDf[['instance_id','predicted_score','hour']], "%s_hashour.txt" % modelName)
 
     # 生成stacking数据集
     df['predicted_score'] = np.nan
