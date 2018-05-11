@@ -3,30 +3,30 @@
 
 '''
 目标均值：
-0    0.051762
-1    0.044351
-2    0.039073
-3    0.038068
-4    0.040123
-5    0.044436
-6    0.043755
-7    0.048183
-8    0.047861
-9    0.045140
-10   0.043612
-11   0.043149
-12   0.042641
-13   0.040599
-14   0.039930
-15   0.040100
-16   0.039957
-17   0.040177
-18   0.039958
-19   0.039547
-20   0.039542
-21   0.036749
-22   0.035445
-23   0.034270
+0    0.051762 
+1    0.044351 
+2    0.039073 
+3    0.038068 
+4    0.040123 
+5    0.044436 
+6    0.043755 
+7    0.048183 
+8    0.047861 
+9    0.045140 
+10   0.043612 
+11   0.043149 
+12   0.042641 
+13   0.040599 
+14   0.039930 
+15   0.040100 
+16   0.039957 
+17   0.040177 
+18   0.039958 
+19   0.039547 
+20   0.039542 
+21   0.036749 
+22   0.035445 
+23   0.034270 
 '''
 
 import pandas as pd
@@ -45,7 +45,7 @@ import json, random
 def resultAdjustment(result_df, t, showMean=False):
     result_df_temp = result_df.copy()
     result_df_temp['x'] = result_df_temp.predicted_score.map(lambda x: -(math.log(((1 - x) / x), math.e)))
-    result_df_temp['adjust_result'] = result_df_temp.x.map(lambda x: 1 / (1 + math.exp(-(x + t))))
+    result_df_temp['adjust_result'] = result_df_temp.x.map(lambda x: 1 / (1 + math.exp(-(x + t)))) 
     if showMean:
     	print(result_df_temp['adjust_result'].mean())
     return result_df_temp['adjust_result']
@@ -55,24 +55,24 @@ def exportResult(df, fileName, header=True, index=False, sep=' '):
     df.to_csv('./%s' % fileName, sep=sep, header=header, index=index)
 
 def main():
-	df = pd.read_csv('xgboost2A_hashour.txt', sep=' ')
+	df = pd.read_csv('xgboost2B_hashour.txt', sep=' ')
 	print(df.info())
 	df2 = df.copy()
-	df2.loc[df2.hour==12, 'predicted_score'] = resultAdjustment(df2[df2.hour==12], -0.17143)
-	df2.loc[df2.hour==13, 'predicted_score'] = resultAdjustment(df2[df2.hour==13], -0.20506)
-	df2.loc[df2.hour==14, 'predicted_score'] = resultAdjustment(df2[df2.hour==14], -0.203945)
-	df2.loc[df2.hour==15, 'predicted_score'] = resultAdjustment(df2[df2.hour==15], -0.19792)
-	df2.loc[df2.hour==16, 'predicted_score'] = resultAdjustment(df2[df2.hour==16], -0.21478)
-	df2.loc[df2.hour==17, 'predicted_score'] = resultAdjustment(df2[df2.hour==17], -0.21545)
-	df2.loc[df2.hour==18, 'predicted_score'] = resultAdjustment(df2[df2.hour==18], -0.22732)
-	df2.loc[df2.hour==19, 'predicted_score'] = resultAdjustment(df2[df2.hour==19], -0.24932)
-	df2.loc[df2.hour==20, 'predicted_score'] = resultAdjustment(df2[df2.hour==20], -0.25953)
-	df2.loc[df2.hour==21, 'predicted_score'] = resultAdjustment(df2[df2.hour==21], -0.34407)
-	df2.loc[df2.hour==22, 'predicted_score'] = resultAdjustment(df2[df2.hour==22], -0.40361)
-	df2.loc[df2.hour==23, 'predicted_score'] = resultAdjustment(df2[df2.hour==23], -0.447554)
+	df2.loc[df2.hour==12, 'predicted_score'] = resultAdjustment(df2[df2.hour==12], -0.0281)
+	df2.loc[df2.hour==13, 'predicted_score'] = resultAdjustment(df2[df2.hour==13], -0.07472)
+	df2.loc[df2.hour==14, 'predicted_score'] = resultAdjustment(df2[df2.hour==14], -0.08166)
+	df2.loc[df2.hour==15, 'predicted_score'] = resultAdjustment(df2[df2.hour==15], -0.07843)
+	df2.loc[df2.hour==16, 'predicted_score'] = resultAdjustment(df2[df2.hour==16], -0.09815)
+	df2.loc[df2.hour==17, 'predicted_score'] = resultAdjustment(df2[df2.hour==17], -0.108915)
+	df2.loc[df2.hour==18, 'predicted_score'] = resultAdjustment(df2[df2.hour==18], -0.115455)
+	df2.loc[df2.hour==19, 'predicted_score'] = resultAdjustment(df2[df2.hour==19], -0.129315)
+	df2.loc[df2.hour==20, 'predicted_score'] = resultAdjustment(df2[df2.hour==20], -0.14448)
+	df2.loc[df2.hour==21, 'predicted_score'] = resultAdjustment(df2[df2.hour==21], -0.2416)
+	df2.loc[df2.hour==22, 'predicted_score'] = resultAdjustment(df2[df2.hour==22], -0.30208)
+	df2.loc[df2.hour==23, 'predicted_score'] = resultAdjustment(df2[df2.hour==23], -0.37449)
 	print(pd.pivot_table(df2, index=['hour'], values='predicted_score', aggfunc=np.mean))
 	print(np.mean(df2.predicted_score))
-	exportResult(df2[['instance_id','predicted_score']], "%s.txt" % 'xgboost2A')
+	exportResult(df2[['instance_id','predicted_score']], "%s.txt" % 'xgboost_after_lake_5_11_8')
 
 if __name__ == '__main__':
-    main()
+	main()

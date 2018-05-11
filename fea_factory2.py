@@ -288,6 +288,18 @@ def addShopFea(df, originDf=None, **params):
 
     df = statUserAge(df, df, 'shop_id', 'shop')
     df = statUserGender(df, df, 'shop_id', 'shop')
+
+    tempDf = df.drop_duplicates(['item_id'])
+    tempDf = pd.pivot_table(tempDf, index=['shop_id','item_brand_id'], values=['item_id'], aggfunc=[len])
+    tempDf.columns = ['shop_brand_item_count']
+    tempDf.reset_index(inplace=True)
+    tempDf2 = tempDf.shop_id.value_counts().to_frame()
+    tempDf2.columns = ['shop_brand_count']
+    df = df.merge(tempDf, how='left', on=['shop_id','item_brand_id'])
+    df = df.merge(tempDf2, how='left', left_on=['shop_id'], right_index=True)
+    df['shop_brand_item_ratio'] = biasSmooth(df['shop_brand_item_count'].values, df['shop_item_count'].values)
+    df['shop_brand_count_ratio'] = biasSmooth(df['shop_brand_count'].values, df['shop_item_count'].values)
+    df['shop_brand_special_degree'] = biasSmooth(df['shop_item_count'].values,(df['shop_item_count']+df['shop_brand_count']).values)
     return df
 
 # 添加商品历史浏览量及购买量特征
@@ -344,7 +356,6 @@ def addUserFea(df, originDf=None, **params):
     tempDf.loc[~tempDf.last_user_id, 'last_show_time'] = np.nan
     tempDf['user_last_show_timedelta'] = tempDf['context_timestamp'] - tempDf['last_show_time']
     tempDf['user_last_show_timedelta'] = tempDf['user_last_show_timedelta'].dt.seconds
-    tempDf['user_last_show_timedelta'].fillna(999999, inplace=True)
     hourShowList = []
     hourShowTemp = {}
     for same, dt, show in tempDf[['last_user_id','context_timestamp','show']].values:
@@ -363,12 +374,12 @@ def addUserFea(df, originDf=None, **params):
     tempDf.sort_index(ascending=False, inplace=True)
     tempDf.columns = ['show']
     tempDf.reset_index(inplace=True)
-    tempDf[['next_user','next_time']] = tempDf[['user_id','context_timestamp']].shift(1)
+    tempDf['next_user'] = tempDf['user_id'].shift(1)
+    tempDf['next_time'] = tempDf['context_timestamp'].shift(1)
     tempDf['same_next'] = (tempDf.user_id==tempDf.next_user)
     tempDf.loc[~tempDf.same_next, 'next_time'] = np.nan
     tempDf['user_next_show_timedelta'] = tempDf['next_time'] - tempDf['context_timestamp']
     tempDf['user_next_show_timedelta'] = tempDf['user_next_show_timedelta'].dt.seconds
-    tempDf['user_next_show_timedelta'].fillna(999999, inplace=True)
     hourShowList = []
     hourShowTemp = {}
     for same, dt, show in tempDf[['same_next','context_timestamp','show']].values:
@@ -382,8 +393,11 @@ def addUserFea(df, originDf=None, **params):
     tempDf['user_nexthour_show'] = hourShowList
     df = df.merge(tempDf[['user_id','context_timestamp','user_next_show_timedelta','user_nexthour_show']], how='left', on=['user_id','context_timestamp'])
     df['user_near_timedelta'] = df['user_next_show_timedelta'] - df['user_last_show_timedelta']
-    df['user_nearhour_show_delta'] = df['user_lasthour_show'] - df['user_nexthour_show']
-    df.loc[(df.user_last_show_timedelta==999999)&(df.user_next_show_timedelta==999999), ['user_near_timedelta']] = 999999
+    df.loc[(df.user_near_timedelta.isnull())&(df.user_next_show_timedelta.notnull()), ['user_near_timedelta']] = -999999
+    df.loc[(df.user_near_timedelta.isnull())&(df.user_last_show_timedelta.notnull()), ['user_near_timedelta']] = 999999
+    df['user_nearhour_show_delta'] = df['user_nexthour_show'] - df['user_lasthour_show']
+    df.loc[(df.user_lasthour_show==0)&(df.user_nexthour_show==0), ['user_nearhour_show_delta']] = np.nan
+    df.fillna({k:999999 for k in ['user_last_show_timedelta', 'user_next_show_timedelta']}, inplace=True)
 
     tempDf = pd.pivot_table(df, index=['user_id','date'], values=['is_trade'], aggfunc=[len,np.sum])
     tempDf.columns = ['user_lastdate_show','user_lastdate_trade']
@@ -413,7 +427,10 @@ def addContextFea(df, **params):
     df['prop_jaccard'] = df['prop_intersect_num'] / df['prop_union_num']
     df['prop_predict_ratio'] = df['prop_intersect_num'] / df['predict_prop_num']
     df['prop_item_ratio'] = df['prop_intersect_num'] / df['item_prop_num']
-    df.fillna({k:-1 for k in ['predict_prop_num','prop_intersect_num','prop_union_num','prop_jaccard','prop_predict_ratio','prop_item_ratio']}, inplace=True)
+    df['prop_jaccard_bias'] = biasSmooth(df['prop_intersect_num'].values, df['prop_union_num'].values)
+    df['prop_predict_ratio_bias'] = biasSmooth(df['prop_intersect_num'].values, df['predict_prop_num'].values)
+    df['prop_item_ratio_bias'] = biasSmooth(df['prop_intersect_num'].values, df['item_prop_num'].values)
+    # df.fillna({k:-1 for k in ['predict_prop_num','prop_intersect_num','prop_union_num','prop_jaccard','prop_predict_ratio','prop_item_ratio']}, inplace=True)
     return df
 
 # 添加品牌相关特征
@@ -454,12 +471,13 @@ def addUserCateFea(df, originDf=None, **params):
     tempDf = pd.pivot_table(originDf, index=['user_id','item_category1','context_timestamp'], values=['item_price_level'], aggfunc=[len,np.mean])
     tempDf.columns = ['show','price']
     tempDf.reset_index(inplace=True)
-    tempDf[['last_user','last_cate','last_time']] = tempDf[['user_id','item_category1','context_timestamp']].shift(1)
+    tempDf['last_user'] = tempDf['user_id'].shift(1)
+    tempDf['last_cate'] = tempDf['item_category1'].shift(1)
+    tempDf['last_time'] = tempDf['context_timestamp'].shift(1)
     tempDf['same'] = (tempDf.user_id==tempDf.last_user) & (tempDf.item_category1==tempDf.last_cate)
     tempDf.loc[~tempDf.same, 'last_time'] = np.nan
     tempDf['uc_last_show_timedelta'] = tempDf['context_timestamp'] - tempDf['last_time']
     tempDf['uc_last_show_timedelta'] = tempDf['uc_last_show_timedelta'].dt.seconds
-    tempDf['uc_last_show_timedelta'].fillna(999999, inplace=True)
     hourShowList = []
     hourShowTemp = {}
     priceList = []
@@ -489,12 +507,13 @@ def addUserCateFea(df, originDf=None, **params):
     tempDf.sort_index(ascending=False, inplace=True)
     tempDf.columns = ['show']
     tempDf.reset_index(inplace=True)
-    tempDf[['next_user','next_cate','next_time']] = tempDf[['user_id','item_category1','context_timestamp']].shift(1)
+    tempDf['next_user'] = tempDf['user_id'].shift(1)
+    tempDf['next_cate'] = tempDf['item_category1'].shift(1)
+    tempDf['next_time'] = tempDf['context_timestamp'].shift(1)
     tempDf['same_next'] = (tempDf.user_id==tempDf.next_user) & (tempDf.item_category1==tempDf.next_cate)
     tempDf.loc[~tempDf.same_next, 'next_time'] = np.nan
     tempDf['uc_next_show_timedelta'] = tempDf['next_time'] - tempDf['context_timestamp']
     tempDf['uc_next_show_timedelta'] = tempDf['uc_next_show_timedelta'].dt.seconds
-    tempDf['uc_next_show_timedelta'].fillna(999999, inplace=True)
     hourShowList = []
     hourShowTemp = {}
     for same, dt, show in tempDf[['same_next','context_timestamp','show']].values:
@@ -508,7 +527,11 @@ def addUserCateFea(df, originDf=None, **params):
     tempDf['uc_nexthour_show'] = hourShowList
     df = df.merge(tempDf[['user_id','item_category1','context_timestamp','uc_next_show_timedelta','uc_nexthour_show']], how='left', on=['user_id','item_category1','context_timestamp'])
     df['uc_near_timedelta'] = df['uc_next_show_timedelta'] - df['uc_last_show_timedelta']
-    df['uc_nearhour_show_delta'] = df['uc_lasthour_show'] - df['uc_nexthour_show']
+    df.loc[(df.uc_near_timedelta.isnull())&(df.uc_next_show_timedelta.notnull()), ['uc_near_timedelta']] = -999999
+    df.loc[(df.uc_near_timedelta.isnull())&(df.uc_last_show_timedelta.notnull()), ['uc_near_timedelta']] = 999999
+    df['uc_nearhour_show_delta'] = df['uc_nexthour_show'] - df['uc_lasthour_show']
+    df.loc[(df.uc_lasthour_show==0)&(df.uc_nexthour_show==0), ['uc_nearhour_show_delta']] = np.nan
+    df.fillna({k:999999 for k in ['uc_last_show_timedelta', 'uc_next_show_timedelta']}, inplace=True)
 
     tempDf = statDateTrade(originDf, ['user_id','item_category1'], **params['statDateTrade'])
     tempDf.columns = ['uc_his_show','uc_his_trade']
@@ -524,24 +547,15 @@ def addUserItemFea(df, originDf=None, **params):
     tempDf = pd.pivot_table(originDf, index=['user_item','context_timestamp'], values=['is_trade'], aggfunc=len)
     tempDf.columns = ['show']
     tempDf.reset_index(inplace=True)
-    tempDf['last_user_item'] = tempDf['user_item'].shift(1)
-    tempDf['last_user_item'] = tempDf['last_user_item']==tempDf['user_item']
+    tempDf['same'] = tempDf['user_item'].shift(1)
+    tempDf['same'] = tempDf['same']==tempDf['user_item']
     tempDf['last_show_time'] = tempDf['context_timestamp'].shift(1)
-    tempDf.loc[~tempDf.last_user_item, 'last_show_time'] = np.nan
+    tempDf.loc[~tempDf.same, 'last_show_time'] = np.nan
     tempDf['ui_last_show_timedelta'] = tempDf['context_timestamp'] - tempDf['last_show_time']
     tempDf['ui_last_show_timedelta'] = tempDf['ui_last_show_timedelta'].dt.seconds
-    tempDf['ui_last_show_timedelta'].fillna(999999, inplace=True)
-    # 穿越特征
-    tempDf['next_user_item'] = tempDf['user_item'].shift(-1)
-    tempDf['next_user_item'] = tempDf['next_user_item']==tempDf['user_item']
-    tempDf['next_show_time'] = tempDf['context_timestamp'].shift(-1)
-    tempDf.loc[~tempDf.next_user_item, 'next_show_time'] = np.nan
-    tempDf['ui_next_show_timedelta'] = tempDf['context_timestamp'] - tempDf['next_show_time']
-    tempDf['ui_next_show_timedelta'] = tempDf['ui_next_show_timedelta'].dt.seconds
-    tempDf['ui_next_show_timedelta'].fillna(999999, inplace=True)
     hourShowList = []
     hourShowTemp = {}
-    for same, dt, show in tempDf[['last_user_item','context_timestamp','show']].values:
+    for same, dt, show in tempDf[['same','context_timestamp','show']].values:
         if same:
             [hourShowTemp.pop(k) for k in list(hourShowTemp) if k<dt-timedelta(hours=1)]
             hourShowList.append(np.sum(list(hourShowTemp.values())))
@@ -550,8 +564,40 @@ def addUserItemFea(df, originDf=None, **params):
             hourShowList.append(0)
             hourShowTemp = {dt:show}
     tempDf['ui_lasthour_show'] = hourShowList
-    df = df.merge(tempDf[['user_item','context_timestamp','ui_last_show_timedelta','ui_next_show_timedelta','ui_lasthour_show']], how='left', on=['user_item','context_timestamp'])
+    df = df.merge(tempDf[['user_item','context_timestamp','ui_last_show_timedelta','ui_lasthour_show']], how='left', on=['user_item','context_timestamp'])
     df['ui_lasthour_show_ratio'] = biasSmooth(df.ui_lasthour_show.values, df.uc_lasthour_show.values)
+
+    # 穿越特征
+    tempDf = pd.pivot_table(originDf, index=['user_item','context_timestamp'], values=['is_trade'], aggfunc=len)
+    tempDf.sort_index(ascending=False, inplace=True)
+    tempDf.columns = ['show']
+    tempDf.reset_index(inplace=True)
+    tempDf['same'] = tempDf['user_item'].shift(1)
+    tempDf['same'] = tempDf['same']==tempDf['user_item']
+    tempDf['next_show_time'] = tempDf['context_timestamp'].shift(1)
+    tempDf.loc[~tempDf.same, 'next_show_time'] = np.nan
+    tempDf['ui_next_show_timedelta'] = tempDf['next_show_time'] - tempDf['context_timestamp']
+    tempDf['ui_next_show_timedelta'] = tempDf['ui_next_show_timedelta'].dt.seconds
+    hourShowList = []
+    hourShowTemp = {}
+    for same, dt, show in tempDf[['same','context_timestamp','show']].values:
+        if same:
+            [hourShowTemp.pop(k) for k in list(hourShowTemp) if k>dt+timedelta(hours=1)]
+            hourShowList.append(np.sum(list(hourShowTemp.values())))
+            hourShowTemp[dt] = show
+        else:
+            hourShowList.append(0)
+            hourShowTemp = {dt:show}
+    tempDf['ui_nexthour_show'] = hourShowList
+    df = df.merge(tempDf[['user_item','context_timestamp','ui_next_show_timedelta','ui_nexthour_show']], how='left', on=['user_item','context_timestamp'])
+    df['ui_nexthour_show_ratio'] = biasSmooth(df.ui_nexthour_show.values, df.uc_nexthour_show.values)
+
+    df['ui_near_timedelta'] = df['ui_next_show_timedelta'] - df['ui_last_show_timedelta']
+    df.loc[(df.ui_near_timedelta.isnull())&(df.ui_next_show_timedelta.notnull()), ['ui_near_timedelta']] = -999999
+    df.loc[(df.ui_near_timedelta.isnull())&(df.ui_last_show_timedelta.notnull()), ['ui_near_timedelta']] = 999999
+    df['ui_nearhour_show_delta'] = df['ui_nexthour_show'] - df['ui_lasthour_show']
+    df.loc[(df.ui_lasthour_show==0)&(df.ui_nexthour_show==0), ['ui_nearhour_show_delta']] = np.nan
+    df.fillna({k:999999 for k in ['ui_last_show_timedelta', 'ui_next_show_timedelta']}, inplace=True)
 
     tempDf = pd.pivot_table(originDf, index=['user_item','date'], values=['is_trade'], aggfunc=[len,np.sum])
     tempDf.columns = ['ui_lastdate_show', 'ui_lastdate_trade']
@@ -559,6 +605,11 @@ def addUserItemFea(df, originDf=None, **params):
     tempDf['date'] = tempDf['date'] + timedelta(days=1)
     df = df.merge(tempDf[['user_item','date','ui_lastdate_show', 'ui_lastdate_trade']], how='left', on=['user_item','date'])
     df.fillna({k:0 for k in ['ui_lastdate_show', 'ui_lastdate_trade','ui_lasthour_show']}, inplace=True)
+
+    tempDf = statDateTrade(originDf, ['user_id','item_id'], **params['statDateTrade'])
+    tempDf.columns = ['ui_his_show','ui_his_trade']
+    tempDf['ui_his_trade_ratio'] = biasSmooth(tempDf['ui_his_trade'].values, tempDf['ui_his_show'].values)
+    df = df.merge(tempDf, how='left', left_on=['user_id','item_id','date'], right_index=True)
     return df
 
 # 统计用户该店铺的统计特征
@@ -570,6 +621,68 @@ def addUserShopFea(df, originDf=None, **params):
     tempDf.columns = ['us_his_show','us_his_trade']
     tempDf['us_his_trade_ratio'] = biasSmooth(tempDf['us_his_trade'].values, tempDf['us_his_show'].values)
     df = df.merge(tempDf, how='left', left_on=['user_id','shop_id','date'], right_index=True)
+
+    tempDf = pd.pivot_table(originDf, index=['user_id','shop_id','context_timestamp'], values=['is_trade'], aggfunc=[len])
+    tempDf.columns = ['show']
+    tempDf.reset_index(inplace=True)
+    tempDf['last_user'] = tempDf['user_id'].shift(1)
+    tempDf['last_shop'] = tempDf['shop_id'].shift(1)
+    tempDf['last_time'] = tempDf['context_timestamp'].shift(1)
+    tempDf['same'] = (tempDf.user_id==tempDf.last_user) & (tempDf.shop_id==tempDf.last_shop)
+    tempDf.loc[~tempDf.same, 'last_time'] = np.nan
+    tempDf['us_last_show_timedelta'] = tempDf['context_timestamp'] - tempDf['last_time']
+    tempDf['us_last_show_timedelta'] = tempDf['us_last_show_timedelta'].dt.seconds
+    hourShowList = []
+    hourShowTemp = {}
+    for same, dt, show in tempDf[['same','context_timestamp','show']].values:
+        if same:
+            [hourShowTemp.pop(k) for k in list(hourShowTemp) if k<dt-timedelta(hours=1)]
+            hourShowList.append(np.sum(list(hourShowTemp.values())))
+            hourShowTemp[dt] = show
+        else:
+            hourShowList.append(0)
+            hourShowTemp = {dt:show}
+    tempDf['us_lasthour_show'] = hourShowList
+    df = df.merge(tempDf[['user_id','shop_id','context_timestamp','us_last_show_timedelta','us_lasthour_show']], how='left', on=['user_id','shop_id','context_timestamp'])
+    df['us_lasthour_show_ratio'] = biasSmooth(df.us_lasthour_show.values, df.user_lasthour_show.values)
+
+    # 穿越特征
+    tempDf = pd.pivot_table(df, index=['user_id','shop_id','context_timestamp'], values=['item_price_level'], aggfunc=[len])
+    tempDf.sort_index(ascending=False, inplace=True)
+    tempDf.columns = ['show']
+    tempDf.reset_index(inplace=True)
+    tempDf['next_user'] = tempDf['user_id'].shift(1)
+    tempDf['next_shop'] = tempDf['shop_id'].shift(1)
+    tempDf['next_time'] = tempDf['context_timestamp'].shift(1)
+    tempDf['same_next'] = (tempDf.user_id==tempDf.next_user) & (tempDf.shop_id==tempDf.next_shop)
+    tempDf.loc[~tempDf.same_next, 'next_time'] = np.nan
+    tempDf['us_next_show_timedelta'] = tempDf['next_time'] - tempDf['context_timestamp']
+    tempDf['us_next_show_timedelta'] = tempDf['us_next_show_timedelta'].dt.seconds
+    hourShowList = []
+    hourShowTemp = {}
+    for same, dt, show in tempDf[['same_next','context_timestamp','show']].values:
+        if same:
+            [hourShowTemp.pop(k) for k in list(hourShowTemp) if k>dt+timedelta(hours=1)]
+            hourShowList.append(np.sum(list(hourShowTemp.values())))
+            hourShowTemp[dt] = show
+        else:
+            hourShowList.append(0)
+            hourShowTemp = {dt:show}
+    tempDf['us_nexthour_show'] = hourShowList
+    df = df.merge(tempDf[['user_id','shop_id','context_timestamp','us_next_show_timedelta','us_nexthour_show']], how='left', on=['user_id','shop_id','context_timestamp'])
+    df['us_near_timedelta'] = df['us_next_show_timedelta'] - df['us_last_show_timedelta']
+    df.loc[(df.us_near_timedelta.isnull())&(df.us_next_show_timedelta.notnull()), ['us_near_timedelta']] = -999999
+    df.loc[(df.us_near_timedelta.isnull())&(df.us_last_show_timedelta.notnull()), ['us_near_timedelta']] = 999999
+    df['us_nearhour_show_delta'] = df['us_nexthour_show'] - df['us_lasthour_show']
+    df.loc[(df.us_lasthour_show==0)&(df.us_nexthour_show==0), ['us_nearhour_show_delta']] = np.nan
+    df.fillna({k:999999 for k in ['us_last_show_timedelta', 'us_next_show_timedelta']}, inplace=True)
+
+    tempDf = pd.pivot_table(originDf, index=['user_id','shop_id','date'], values=['is_trade'], aggfunc=[len,np.sum])
+    tempDf.columns = ['us_lastdate_show', 'us_lastdate_trade']
+    tempDf.reset_index(inplace=True)
+    tempDf['date'] = tempDf['date'] + timedelta(days=1)
+    df = df.merge(tempDf[['user_id','shop_id','date','us_lastdate_show', 'us_lastdate_trade']], how='left', on=['user_id','shop_id','date'])
+    df.fillna({k:0 for k in ['us_lastdate_show', 'us_lastdate_trade']}, inplace=True)
     return df
 
 # 统计用户该价格段商品的统计特征
@@ -645,11 +758,21 @@ def addBrandCrossFea(df, **params):
     tempDf.columns = ['ba_his_show','ba_his_trade']
     tempDf['ba_his_trade_ratio'] = biasSmooth(tempDf['ba_his_trade'].values, tempDf['ba_his_show'].values)
     df = df.merge(tempDf, how='left', left_on=['item_brand_id','user_age_level','date'], right_index=True)
+    for x in set(df.user_age_level.dropna().values):
+        idx = df[df.user_age_level==x].index
+        df.loc[idx, 'ba_his_show_ratio'] = biasSmooth(df.loc[idx, 'ba_his_show'].values, df.loc[idx,'brand_his_show'].values)
+    df['ba_his_show_delta'] = df['ba_his_show_ratio'] - df['ca_his_show_ratio']
+    df['ba_his_trade_delta'] = df['ba_his_trade_ratio'] - df['ca_his_trade_ratio']
 
     tempDf = statDateTrade(df, ['item_brand_id','user_gender_id'], **params['statDateTrade'])
     tempDf.columns = ['bg_his_show','bg_his_trade']
     tempDf['bg_his_trade_ratio'] = biasSmooth(tempDf['bg_his_trade'].values, tempDf['bg_his_show'].values)
     df = df.merge(tempDf, how='left', left_on=['item_brand_id','user_gender_id','date'], right_index=True)
+    for x in set(df.user_gender_id.dropna().values):
+        idx = df[df.user_gender_id==x].index
+        df.loc[idx, 'bg_his_show_ratio'] = biasSmooth(df.loc[idx, 'bg_his_show'].values, df.loc[idx,'brand_his_show'].values)
+    df['bg_his_show_delta'] = df['bg_his_show_ratio'] - df['cg_his_show_ratio']
+    df['bg_his_trade_delta'] = df['bg_his_trade_ratio'] - df['cg_his_trade_ratio']
     return df
 
 # 数据清洗
@@ -666,6 +789,7 @@ def dataCleaning(df):
 
 # 特征方法汇总
 def feaFactory(df, originDf=None, **args):
+    startTime = datetime.now()
     params = {
         'statDateTrade': {
             'statDates': None,
@@ -676,20 +800,34 @@ def feaFactory(df, originDf=None, **args):
         for k2,v in arg.items():
             params[k1][k2] = v
     df = addTimeFea(df, **params)
+    print('finished time fea: ', datetime.now() - startTime)
     df = addCateFea(df, originDf, **params)
+    print('finished cate fea: ', datetime.now() - startTime)
     df = addUserFea(df, originDf, **params)
+    print('finished user fea: ', datetime.now() - startTime)
     df = addShopFea(df, originDf, **params)
+    print('finished shop fea: ', datetime.now() - startTime)
     df = addItemFea(df, originDf, **params)
+    print('finished item fea: ', datetime.now() - startTime)
     df = addContextFea(df, **params)
+    print('finished context fea: ', datetime.now() - startTime)
     df = addBrandFea(df,originDf, **params)
+    print('finished brand fea: ', datetime.now() - startTime)
     df = addUserCateFea(df, originDf, **params)
+    print('finished uc fea: ', datetime.now() - startTime)
     df = addUserItemFea(df, originDf, **params)
+    print('finished ui fea: ', datetime.now() - startTime)
     df = addUserShopFea(df, originDf, **params)
+    print('finished us fea: ', datetime.now() - startTime)
     df = addUserPriceFea(df, originDf, **params)
+    print('finished up fea: ', datetime.now() - startTime)
     # df = addUserHourFea(df, originDf, **params)
     df = addCateCrossFea(df, **params)
-    # df = addBrandCrossFea(df, **params)
+    print('finished catecross fea: ', datetime.now() - startTime)
     df = addItemCrossFea(df, **params)
+    print('finished itemcross fea: ', datetime.now() - startTime)
+    df = addBrandCrossFea(df, **params)
+    print('finished brandcross fea: ', datetime.now() - startTime)
     print('finished feaFactory: ', datetime.now() - startTime)
     return df
 
@@ -698,38 +836,50 @@ def exportResult(df, fileName, header=True, index=False, sep=' '):
     df.to_csv('./%s' % fileName, sep=sep, header=header, index=index)
 
 
-if __name__ == '__main__':
+def main():
     # 准备数据
     startTime = datetime.now()
-    # df = importDf('../data/round2_train_sample.txt')
-    df = importDf('../data/round2_train.txt')
+    # df = importDf('./data/round2_train_sample.txt')
+    df = importDf('./data/round2_train.txt')
     df['dataset'] = 0
-    predictDf = importDf('../data/round2_ijcai_18_test_a_20180425.txt')
-    predictDf['dataset'] = -1
-    originDf = pd.concat([df,predictDf], ignore_index=True)
-    originDf = originDf.sample(frac=0.05)
+    # dfA = importDf('./data/round2_test_a_sample.txt')
+    dfA = importDf('./data/round2_ijcai_18_test_a_20180425.txt')
+    dfA['dataset'] = -1
+    # predictDf = importDf('./data/round2_test_b_sample.txt')
+    predictDf = importDf('./data/round2_ijcai_18_test_b_20180510.txt')
+    predictDf['dataset'] = -2
+    originDf = pd.concat([df,dfA,predictDf], ignore_index=True)
+    # originDf = originDf.sample(frac=0.1)
     print('prepare dataset time:', datetime.now()-startTime)
 
     # 特征处理
-    startTime = datetime.now()
     originDf = dataCleaning(originDf)
     originDf = feaFactory(originDf)
     df = originDf[(originDf.date=='2018-09-07')&(originDf['dataset']>=0)]
     df2 = originDf[(originDf.date.isin(['2018-09-01','2018-09-02','2018-09-03']))&(originDf['dataset']>=0)]
-    print(df.date.value_counts())
-    predictDf = originDf[originDf['dataset']==-1]
+    dfA = originDf[originDf['dataset']==-1]
+    predictDf = originDf[originDf['dataset']==-2]
 
-    print(df.iloc[:,70:].info())
-    print(df.iloc[:,70:140].info())
-    print(df.iloc[:,140:].info())
+    print(df.iloc[:,:80].info())
+    print(df.iloc[:,80:160].info())
+    print(df.iloc[:,160:].info())
 
     fea2 = set(df.columns.values)
     fea2 = fea2 - set(['context_timestamp','dataset','predict_category_property','item_category_list','item_property_list','date','predict_category','predict_property'])
     fea2 = list(fea2)
     print(df.loc[:,fea2].info())
     print(df2.loc[:,fea2].info())
+    print(dfA.loc[:,fea2].info())
     print(predictDf.loc[:,fea2].info())
-    # exit()
+    exit()
     exportResult(df[fea2], "./data/train_fea_special.csv")
+    print('export special finished')
     exportResult(df2[fea2], "./data/train_fea_normal.csv")
-    exportResult(predictDf[fea2], "./data/test_fea.csv")
+    print('export normal finished')
+    exportResult(dfA[fea2], "./data/test_a_fea.csv")
+    print('export testa finished')
+    exportResult(predictDf[fea2], "./data/test_b_fea.csv")
+    print('export testb finished')
+
+if __name__ == '__main__':
+    main()

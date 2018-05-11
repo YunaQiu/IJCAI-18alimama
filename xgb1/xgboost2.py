@@ -19,7 +19,7 @@
         'nfold': 3
 特征： 商品销量等级，商品收藏量等级，商品价格等级，商品广告等级
       用户性别编号，用户年龄段，用户星级等级，用户职业编号
-      小时数，展示页码编号
+      展示页码编号
       店铺好评率/店铺服务评分/店铺物流评分/店铺描述评分，店铺星级，店铺评论数
 
       用户历史转化率（当天以前），用户距离上次点击时长（秒），用户历史点击量，用户过去一小时点击量，用户前一天点击量，用户前一天交易率
@@ -34,8 +34,10 @@
       类目历史转化率，二级类目历史转化率
       用户年龄与类目平均年龄差值
       类目销量均值
-      品牌历史转化率，
-      品牌商品数目
+      品牌历史转化率，品牌前一天转化率，
+      品牌价格与同类差值，品牌收藏与同类差值，品牌销量与同类差值，品牌广告与同类差值
+      用户年龄与品牌平均年龄差值
+      店铺在该品牌的商品比例，店铺品牌数与商品数比值，店铺品牌专卖程度
       小时转化率，上下文预测类目个数，上下文预测类目与商品类目交集个数，上下文属性与商品属性交集的数目，上下文预测属性个数，
 
       用户距离上次点击该商品时长，用户过去一小时点击该商品次数，用户前一天点击该商品次数，用户过去一小时点击该商品与点击该类目次数的比例，
@@ -48,7 +50,7 @@
       用户距离下次点击时长，用户未来一小时点击量，用户前后两次点击时长的差值，用户前后一小时点击量差值，用户在该类目前后一小时点击量差值，用户在该类目前后两次点击时长差值，用户距离下次点击该类目时长
 前期处理：采用全部数据集做统计，只用7号上午的做训练
 后期处理：根据普通日期曲线与特殊日期曲线估算出7号下午每小时的转化率，将训练结果各小时的转化率调整至估算的转化率
-结果： A榜（0.14376）
+结果： B榜（14054）
 
 '''
 
@@ -264,6 +266,18 @@ def feaFactory(df):
     df.loc[(df.uc_last_show_timedelta<999999)&(df.uc_next_show_timedelta==999999),'uc_near_timedelta'] = 999999
     df.loc[(df.uc_last_show_timedelta==999999)&(df.uc_next_show_timedelta==999999),'uc_near_timedelta'] = np.nan
     df.loc[(df.uc_lasthour_show==0)&(df.uc_nexthour_show==0), 'uc_nearhour_show_delta'] = np.nan
+
+    tempDf = df.drop_duplicates(['item_id'])
+    tempDf = pd.pivot_table(tempDf, index=['shop_id','item_brand_id'], values=['item_id'], aggfunc=[len])
+    tempDf.columns = ['sb_item_count']
+    tempDf.reset_index(inplace=True)
+    tempDf2 = tempDf.shop_id.value_counts().to_frame()
+    tempDf2.columns = ['shop_brand_count']
+    df = df.merge(tempDf, how='left', on=['shop_id','item_brand_id'])
+    df = df.merge(tempDf2, how='left', left_on=['shop_id'], right_index=True)
+    df['shop_brand_item_ratio'] = biasSmooth(df['sb_item_count'].values, df['shop_item_count'].values)
+    df['shop_brand_count_ratio'] = biasSmooth(df['shop_brand_count'].values, df['shop_item_count'].values)
+    df['shop_brand_special_degree'] = biasSmooth(df['shop_item_count'].values,(df['shop_item_count']+df['shop_brand_count']).values)
     return df
 
 # 划分训练集和测试集
@@ -300,33 +314,36 @@ def getOof(clf, trainX, trainY, testX, nFold=5, stratify=False, weight=None):
     return oofTrain, oofTest
 
 
-if __name__ == '__main__':
+def main():
     # 准备数据
     startTime = datetime.now()
     # df = importDf('../data/train_fea_special_sample.csv')
     df = importDf('../data/train_fea_special.csv')
     df['dataset'] = 0
-    # predictDf = importDf('../data/test_fea_sample.csv')
-    predictDf = importDf('../data/test_fea.csv')
-    predictDf['dataset'] = -1
-    originDf = pd.concat([df,predictDf], ignore_index=True)
+    # dfA = importDf('../data/test_a_fea_sample.csv')
+    dfA = importDf('../data/test_a_fea.csv')
+    dfA['dataset'] = -1
+    # predictDf = importDf('../data/test_b_fea_sample.csv')
+    predictDf = importDf('../data/test_b_fea.csv')
+    predictDf['dataset'] = -2
+    originDf = pd.concat([df,dfA,predictDf], ignore_index=True)
     print('prepare dataset time:', datetime.now()-startTime)
 
     # 特征处理
     startTime = datetime.now()
     originDf = dataCleaning(originDf)
-    originDf = feaFactory(originDf)
+    # originDf = feaFactory(originDf)
     # idx = originDf.date=='2018-09-07'
     # originDf.loc[idx,'weight'] = 1
     # originDf.loc[~idx, 'weight'] = 1
     df = originDf[(originDf['dataset']>=0)]
-    predictDf = originDf[originDf['dataset']==-1]
+    predictDf = originDf[originDf['dataset']==-2]
 
     # 特征筛选
     fea = [
         'item_sales_level','item_price_level','item_collected_level','item_pv_level',#'item_city_id','item_category1',
         'user_gender_id','user_age_level','user_occupation_id','user_star_level',
-        'context_page_id','hour',
+        'context_page_id',#'hour',
         'shop_review_positive_rate','shop_score_service','shop_score_delivery','shop_score_description','shop_star_level','shop_review_num_level',
 
         'user_his_trade_ratio','user_last_show_timedelta','user_his_show','user_lasthour_show','user_lastdate_show','user_lastdate_trade_ratio',#'user_his_trade',
@@ -344,10 +361,10 @@ if __name__ == '__main__':
         'cate_age_delta',#'cate_age_std','cate_age_mean',
         # 'cate_gender_ratio_delta',#'cate_gender_ratio',
         'cate_sales_mean',#'cate_sales_sum','cate_collected_mean','cate_collected_sum','cate_price_sum','cate_pv_mean','cate_pv_sum','cate_item_count','cate_price_mean',
-        'brand_his_trade_ratio',#'brand_lastdate_trade_ratio'#'brand_his_trade','brand_his_show','brand_his_show_perday',
-        'brand_item_count',
-        # 'brand_price_delta','brand_collected_delta','brand_sales_delta','brand_pv_delta',
-        # 'brand_age_delta',
+        'brand_his_trade_ratio','brand_lastdate_trade_ratio',#'brand_his_trade','brand_his_show','brand_his_show_perday',
+        'brand_price_delta','brand_collected_delta','brand_sales_delta','brand_pv_delta',
+        'brand_age_delta',
+        'shop_brand_item_ratio','shop_brand_count_ratio','shop_brand_special_degree',
         'hour_trade_ratio','predict_cate_num','cate_intersect_num','prop_intersect_num','predict_prop_num',#'prop_jaccard',
 
         'ui_last_show_timedelta','ui_lasthour_show','ui_lastdate_show','ui_lasthour_show_ratio',#'ui_lastdate_trade',
@@ -365,7 +382,7 @@ if __name__ == '__main__':
     # exit()
 
     # 正式模型
-    modelName = "xgboost2A"
+    modelName = "xgboost2B"
     startTime = datetime.now()
     xgbModel = XgbModel(feaNames=fea)
     xgbModel.trainCV(df[fea].values, df['is_trade'].values)#, weight=df['weight'].values
@@ -377,8 +394,8 @@ if __name__ == '__main__':
     predictDf.loc[:,'predicted_score'] = xgbModel.predict(predictDf[fea].values)
     print("预测结果：\n",predictDf[['instance_id','predicted_score']].head())
     print('预测均值：', predictDf['predicted_score'].mean())
-    exportResult(predictDf[['instance_id','predicted_score']], "%s.txt" % modelName)
-    exportResult(predictDf[['instance_id','predicted_score','hour']], "%s_hashour.txt" % modelName)
+    # exportResult(predictDf[['instance_id','predicted_score']], "%s.txt" % modelName)
+    # exportResult(predictDf[['instance_id','predicted_score','hour']], "%s_hashour.txt" % modelName)
 
     # 生成stacking数据集
     df['predicted_score'] = np.nan
@@ -394,6 +411,9 @@ if __name__ == '__main__':
     print('7th train predict aver:', df.loc[df.date=='2018-09-07','predicted_score'].mean())
     print('test predict: \n',predictDf[['instance_id','predicted_score']].head())
     print('test predict aver:', predictDf['predicted_score'].mean())
-    # exit()
+    exit()
     exportResult(df[['instance_id','predicted_score']], "%s_oof_train.csv" % modelName)
     exportResult(predictDf[['instance_id','predicted_score']], "%s_oof_test.csv" % modelName)
+
+if __name__ == '__main__':
+    main()
