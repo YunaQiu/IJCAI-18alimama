@@ -23,14 +23,14 @@
       店铺好评率/店铺服务评分/店铺物流评分/店铺描述评分，店铺星级，店铺评论数
 
       用户历史转化率（当天以前），用户距离上次点击时长（秒），用户历史点击量，用户过去一小时点击量，用户前一天点击量，用户前一天交易率
-      商品历史转化率（当天以前），商品属性个数，商品前一天交易量，商品历史交易量，商品前一天转化率，商品前一天交易量与同类差值，商品前一天转化率与同类差值
+      商品历史转化率（当天以前），商品属性个数，商品前一天交易量，商品历史交易量，商品前一天转化率，商品前一天交易量与同类差值，商品前一天转化率与同类差值，商品前一天点击量与同类差值，商品前一天点击量
       用户年龄与商品平均用户年龄差值
       商品销售等级与同类之差，商品收藏与同类之差，商品广告与同类之差
       店铺历史交易率，店铺前一天交易量，店铺前一天转化率，店铺前一天点击量与同类差值
       用户年龄与店铺平均用户年龄差值
       店铺商品数目
       店铺平均销量与同类之差，店铺平均收藏与同类之差，店铺平均广告投放与同类之差
-      店铺好评率与同类之差，店铺评论数与同类之差，店铺星级与同类之差，店铺商品数与同类之差
+      店铺评论数与同类之差，店铺星级与同类之差，店铺商品数与同类之差
       类目历史转化率，二级类目历史转化率
       用户年龄与类目平均年龄差值
       类目销量均值
@@ -43,15 +43,21 @@
       用户距离上次点击该商品时长，用户过去一小时点击该商品次数，用户前一天点击该商品次数，用户过去一小时点击该商品与点击该类目次数的比例，
       用户在该类目的历史转化率
       用户在该类别的价格均值，商品价格与用户在该类目价格均值的差值
+      用户距离上次点击该店铺时长，用户在该店铺过去一小时点击数，用户在该店铺过去一小时点击数与点击该类目次数的比例
       类目在该年龄段的转化率，类目在该性别的转化率
       商品在该年龄段的转化率，商品在该年龄段的转化率与同类之差
       商品在该性别的转化率，商品在该性别的转化率与同类之差
+      品牌在该年龄段的转化率，品牌在该年龄转化率与同类之差
+      品牌在该性别的转化率，品牌在该性别转化率与同类之差，品牌在该性别点击率与同类之差
 
-      用户距离下次点击时长，用户未来一小时点击量，用户前后两次点击时长的差值，用户前后一小时点击量差值，用户在该类目前后一小时点击量差值，用户在该类目前后两次点击时长差值，用户距离下次点击该类目时长
-前期处理：采用全部数据集做统计，只用7号上午的做训练
-后期处理：根据普通日期曲线与特殊日期曲线估算出7号下午每小时的转化率，将训练结果各小时的转化率调整至估算的转化率
-结果： B榜（14054）
-
+      用户距离下次点击时长，用户未来一小时点击量，用户前后两次点击时长的差值，用户前后一小时点击量差值，
+      用户在该类目前后一小时点击量差值，用户在该类目前后两次点击时长差值，用户距离下次点击该类目时长，用户在该类目未来一小时点击量
+      用户距离下次点击该商品时长，用户未来一小时点击该商品次数，用户前后两次点击该商品的时长差值
+      用户距离下次点击该店铺时长，用户前后一小时点击该店铺次数差值，用户在该店铺未来一小时的点击次数
+前期处理：采用全部数据集做统计
+后期处理：根据普通日期曲线与特殊日期曲线估算出7号下午每小时的转化率，将训练结果各小时的转化率调整至估算的转化率，再将整体均值调到线上均值
+结果： 只用7号训练，线下16952
+      7号 + 15%普通日期， 线下16946
 '''
 
 import pandas as pd
@@ -137,6 +143,19 @@ def biasSmooth(aArr, bArr, method='MME', alpha=None, beta=None):
 class XgbModel:
     def __init__(self, feaNames=None, params={}):
         self.feaNames = feaNames
+        # self.params = {
+        #     'objective': 'binary:logistic',
+        #     'eval_metric':'logloss',
+        #     'silent': True,
+        #     'eta': 0.01,
+        #     'max_depth': 6,
+        #     'gamma': 0.1,
+        #     'subsample': 0.886,
+        #     'colsample_bytree': 0.886,
+        #     'min_child_weight': 1.2,
+        #     # 'max_delta_step': 5,
+        #     'lambda': 5,
+        # }
         self.params = {
             'objective': 'binary:logistic',
             'eval_metric':'logloss',
@@ -149,6 +168,7 @@ class XgbModel:
             'min_child_weight': 8,
             'max_delta_step': 5,
             'lambda': 100,
+            # 'nthread': 20,
         }
         for k,v in params.items():
             self.params[k] = v
@@ -258,26 +278,8 @@ def dataCleaning(df):
 
 # 特征工程
 def feaFactory(df):
-    df.loc[(df.user_last_show_timedelta==999999)&(df.user_next_show_timedelta<999999),'user_near_timedelta'] = -999999
-    df.loc[(df.user_last_show_timedelta<999999)&(df.user_next_show_timedelta==999999),'user_near_timedelta'] = 999999
-    df.loc[(df.user_last_show_timedelta==999999)&(df.user_next_show_timedelta==999999),'user_near_timedelta'] = np.nan
-    df.loc[(df.user_lasthour_show==0)&(df.user_nexthour_show==0),'user_nearhour_show_delta'] = np.nan
-    df.loc[(df.uc_last_show_timedelta==999999)&(df.uc_next_show_timedelta<999999),'uc_near_timedelta'] = -999999
-    df.loc[(df.uc_last_show_timedelta<999999)&(df.uc_next_show_timedelta==999999),'uc_near_timedelta'] = 999999
-    df.loc[(df.uc_last_show_timedelta==999999)&(df.uc_next_show_timedelta==999999),'uc_near_timedelta'] = np.nan
-    df.loc[(df.uc_lasthour_show==0)&(df.uc_nexthour_show==0), 'uc_nearhour_show_delta'] = np.nan
-
-    tempDf = df.drop_duplicates(['item_id'])
-    tempDf = pd.pivot_table(tempDf, index=['shop_id','item_brand_id'], values=['item_id'], aggfunc=[len])
-    tempDf.columns = ['sb_item_count']
-    tempDf.reset_index(inplace=True)
-    tempDf2 = tempDf.shop_id.value_counts().to_frame()
-    tempDf2.columns = ['shop_brand_count']
-    df = df.merge(tempDf, how='left', on=['shop_id','item_brand_id'])
-    df = df.merge(tempDf2, how='left', left_on=['shop_id'], right_index=True)
-    df['shop_brand_item_ratio'] = biasSmooth(df['sb_item_count'].values, df['shop_item_count'].values)
-    df['shop_brand_count_ratio'] = biasSmooth(df['shop_brand_count'].values, df['shop_item_count'].values)
-    df['shop_brand_special_degree'] = biasSmooth(df['shop_item_count'].values,(df['shop_item_count']+df['shop_brand_count']).values)
+    df.loc[df.uc_near_timedelta.notnull(),'uc_near_timedelta'] = 1000000
+    df.loc[df.uc_nearhour_show_delta.notnull(),'uc_nearhour_show_delta'] = -99999
     return df
 
 # 划分训练集和测试集
@@ -317,22 +319,19 @@ def getOof(clf, trainX, trainY, testX, nFold=5, stratify=False, weight=None):
 def main():
     # 准备数据
     startTime = datetime.now()
-    # df = importDf('../data/train_fea_special_sample.csv')
-    df = importDf('../data/train_fea_special.csv')
+    df = importDf('../data/train_fea_special_sample.csv')
+    # df = importDf('../data/train_fea_special.csv')
     df['dataset'] = 0
-    # dfA = importDf('../data/test_a_fea_sample.csv')
-    dfA = importDf('../data/test_a_fea.csv')
-    dfA['dataset'] = -1
-    # predictDf = importDf('../data/test_b_fea_sample.csv')
-    predictDf = importDf('../data/test_b_fea.csv')
+    predictDf = df.sample(frac=0.1)
+    # predictDf = importDf('../data/test_b_fea.csv')
     predictDf['dataset'] = -2
-    originDf = pd.concat([df,dfA,predictDf], ignore_index=True)
+    originDf = pd.concat([df,predictDf], ignore_index=True)
     print('prepare dataset time:', datetime.now()-startTime)
 
     # 特征处理
     startTime = datetime.now()
     originDf = dataCleaning(originDf)
-    # originDf = feaFactory(originDf)
+    originDf = feaFactory(originDf)
     # idx = originDf.date=='2018-09-07'
     # originDf.loc[idx,'weight'] = 1
     # originDf.loc[~idx, 'weight'] = 1
@@ -347,7 +346,7 @@ def main():
         'shop_review_positive_rate','shop_score_service','shop_score_delivery','shop_score_description','shop_star_level','shop_review_num_level',
 
         'user_his_trade_ratio','user_last_show_timedelta','user_his_show','user_lasthour_show','user_lastdate_show','user_lastdate_trade_ratio',#'user_his_trade',
-        'item_his_trade_ratio','item_prop_num','item_lastdate_trade','item_his_trade','item_lastdate_trade_ratio','item_lastdate_trade_delta','item_lastdate_trade_ratio_delta',#item_his_show','item_his_show_delta','item_his_show_perday','item_his_trade_perday','item_his_show_ratio','item_his_show_delta',
+        'item_his_trade_ratio','item_prop_num','item_lastdate_trade','item_his_trade','item_lastdate_trade_ratio','item_lastdate_trade_delta','item_lastdate_trade_ratio_delta','item_lastdate_show_delta','item_lastdate_show',#item_his_show','item_his_show_delta','item_his_show_perday','item_his_trade_perday','item_his_show_ratio','item_his_show_delta',
         'item_age_delta',#'item_age_std','item_age_mean',
         'item_sales_delta','item_collected_delta','item_pv_delta',#'item_price_delta',
         'shop_his_trade_ratio','shop_lastdate_trade','shop_lastdate_trade_ratio','shop_lastdate_show_delta',#'shop_his_show_ratio',#'shop_his_trade','shop_his_show','shop_his_show_delta','shop_his_show_perday','shop_his_show_perday','shop_his_trade_delta',
@@ -355,7 +354,7 @@ def main():
         # 'shop_gender_ratio',# 'shop_gender_ratio_delta',#
         'shop_item_count',# 'shop_collected_mean','shop_price_mean','shop_pv_mean','shop_sales_mean',#'shop_collected_sum','shop_pv_sum','shop_sales_sum','shop_price_sum',
         'shop_sales_delta','shop_pv_delta','shop_collected_delta',#'shop_price_delta',
-        'shop_review_positive_delta',# 'shop_score_description_delta',#'shop_score_service_delta','shop_score_delivery_delta',
+        # 'shop_review_positive_delta','shop_score_service_delta','shop_score_delivery_delta',# 'shop_score_description_delta',#
         'shop_review_num_delta','shop_star_level_delta','shop_item_count_delta',
         'cate_his_trade_ratio','cate2_his_trade_ratio',#'cate_his_trade','cate_his_show','cate_his_show_perday',
         'cate_age_delta',#'cate_age_std','cate_age_mean',
@@ -365,17 +364,22 @@ def main():
         'brand_price_delta','brand_collected_delta','brand_sales_delta','brand_pv_delta',
         'brand_age_delta',
         'shop_brand_item_ratio','shop_brand_count_ratio','shop_brand_special_degree',
-        'hour_trade_ratio','predict_cate_num','cate_intersect_num','prop_intersect_num','predict_prop_num',#'prop_jaccard',
+        'hour_trade_ratio','predict_cate_num','cate_intersect_num','prop_intersect_num','predict_prop_num',#'prop_jaccard','prop_jaccard_bias',
 
         'ui_last_show_timedelta','ui_lasthour_show','ui_lastdate_show','ui_lasthour_show_ratio',#'ui_lastdate_trade',
-        'uc_his_trade_ratio',# 'uc_last_show_timedelta',# 'uc_his_trade','uc_his_show','uc_his_show_ratio','uc_lasthour_show_ratio','uc_lasthour_show',
+        'uc_his_trade_ratio',#'uc_his_trade',# 'uc_last_show_timedelta',# 'uc_his_trade','uc_his_show','uc_his_show_ratio','uc_lasthour_show_ratio','uc_lasthour_show',
         'uc_price_mean','uc_price_delta',
-        # 'up_his_trade_ratio','up_his_show_ratio',#'up_his_trade','up_his_show',
+        'us_last_show_timedelta','us_lasthour_show','us_lasthour_show_ratio',
         'ca_his_trade_ratio','cg_his_trade_ratio',
         'ia_his_trade_ratio','ia_his_trade_delta',#'ia_his_show_delta','ia_his_show_ratio',
         'ig_his_trade_ratio','ig_his_trade_delta',#'ig_his_show_delta','ig_his_show_ratio',
+        'ba_his_trade_ratio','ba_his_trade_delta',#'ia_his_show_delta','ia_his_show_ratio',
+        'bg_his_trade_ratio','bg_his_trade_delta','bg_his_show_delta',#'ig_his_show_delta','ig_his_show_ratio',
 
-        'user_next_show_timedelta','user_nexthour_show','user_near_timedelta','user_nearhour_show_delta','uc_nearhour_show_delta','uc_near_timedelta','uc_next_show_timedelta',#'ui_next_show_timedelta','user_near_timedelta',##
+        'user_next_show_timedelta','user_nexthour_show','user_near_timedelta','user_nearhour_show_delta',
+        'uc_nearhour_show_delta','uc_near_timedelta','uc_next_show_timedelta','uc_nexthour_show',
+        'ui_next_show_timedelta','ui_nexthour_show','ui_near_timedelta',#'ui_nexthour_show_ratio',#'ui_nearhour_show_delta',
+        'us_next_show_timedelta','us_nearhour_show_delta','us_nexthour_show',
     ]
     print(df[fea].info())
     print(predictDf[fea].info())
