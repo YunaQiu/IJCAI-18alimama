@@ -6,21 +6,22 @@
 模型参数：'objective': 'binary:logistic',
         'eval_metric':'logloss',
         'silent': True,
-        'eta': 0.1,
-        'max_depth': 4,
-        'gamma': 0.5,
-        'subsample':0.95,
-        'colsample_bytree': 1,
-        'min_child_weight': 8,
+        'eta': 0.02,
+        'max_depth': 5,
+        'gamma': 1,
+        'subsample': 0.9,
+        'colsample_bytree': 0.95,
+        'min_child_weight': 2,
         'max_delta_step': 5,
-        'lambda': 100,
-        'num_boost_round': 1500
-        'early_stopping_rounds': 10
+        'lambda': 15,
+        'num_boost_round': 8000
+        'early_stopping_rounds': 30
         'nfold': 3
 特征： 商品销量等级，商品收藏量等级，商品价格等级，商品广告等级
       用户性别编号，用户年龄段，用户星级等级，用户职业编号
-      展示页码编号
+      展示页码编号,小时数（加普通日期）
       店铺好评率/店铺服务评分/店铺物流评分/店铺描述评分，店铺星级，店铺评论数
+      距离预测日期天数（加普通日期）
 
       用户历史转化率（当天以前），用户距离上次点击时长（秒），用户历史点击量，用户过去一小时点击量，用户前一天点击量，用户前一天交易率
       商品历史转化率（当天以前），商品属性个数，商品前一天交易量，商品历史交易量，商品前一天转化率，商品前一天交易量与同类差值，商品前一天转化率与同类差值，商品前一天点击量与同类差值，商品前一天点击量
@@ -143,32 +144,19 @@ def biasSmooth(aArr, bArr, method='MME', alpha=None, beta=None):
 class XgbModel:
     def __init__(self, feaNames=None, params={}):
         self.feaNames = feaNames
-        # self.params = {
-        #     'objective': 'binary:logistic',
-        #     'eval_metric':'logloss',
-        #     'silent': True,
-        #     'eta': 0.01,
-        #     'max_depth': 6,
-        #     'gamma': 0.1,
-        #     'subsample': 0.886,
-        #     'colsample_bytree': 0.886,
-        #     'min_child_weight': 1.2,
-        #     # 'max_delta_step': 5,
-        #     'lambda': 5,
-        # }
         self.params = {
             'objective': 'binary:logistic',
             'eval_metric':'logloss',
             'silent': True,
-            'eta': 0.1,
-            'max_depth': 4,
-            'gamma': 0.5,
-            'subsample': 0.95,
-            'colsample_bytree': 1,
-            'min_child_weight': 8,
+            'eta': 0.02,
+            'max_depth': 5,
+            'gamma': 1,
+            'subsample': 0.9,
+            'colsample_bytree': 0.95,
+            'min_child_weight': 2,
             'max_delta_step': 5,
-            'lambda': 100,
-            # 'nthread': 20,
+            'lambda': 15,
+            'nthread': 15,
         }
         for k,v in params.items():
             self.params[k] = v
@@ -193,7 +181,7 @@ class XgbModel:
         )
         self.clf = clf
 
-    def trainCV(self, X, y, nFold=3, verbose=True, num_boost_round=1500, early_stopping_rounds=10, weight=None):
+    def trainCV(self, X, y, nFold=3, verbose=True, num_boost_round=8000, early_stopping_rounds=30, weight=None):
         X = X.astype(float)
         dtrain = xgb.DMatrix(X, label=y, feature_names=self.feaNames)
         if weight!=None:
@@ -211,16 +199,16 @@ class XgbModel:
         )
         self.clf = clf
 
-    def gridSearch(self, X, y, nFold=3, verbose=1, num_boost_round=130):
+    def gridSearch(self, X, y, nFold=3, verbose=1, num_boost_round=500):
         paramsGrids = {
             # 'n_estimators': [50+5*i for i in range(0,30)],
-            'gamma': [0,0.01,0.05,0.1,0.5,1,5,10,50,100],
-            # 'max_depth': list(range(3,10)),
+            'gamma': [0,0.05,0.1,0.5,1,5,10,50,100],
+            'max_depth': list(range(3,8)),
             'min_child_weight': list(range(0,10)),
-            'subsample': [1-0.05*i for i in range(0,8)],
-            'colsample_bytree': [1-0.05*i for i in range(0,10)],
+            'subsample': [1-0.05*i for i in range(0,6)],
+            'colsample_bytree': [1-0.05*i for i in range(0,6)],
             # 'reg_alpha': [0+2*i for i in range(0,10)],
-            'reg_lambda': [0+50*i for i in range(0,10)],
+            'reg_lambda': [0,5,10,15,20,30,50,70,100,150,200,250,300,500],
             'max_delta_step': [0+1*i for i in range(0,8)],
         }
         for k,v in paramsGrids.items():
@@ -235,7 +223,8 @@ class XgbModel:
                     colsample_bytree = self.params['colsample_bytree'],
                     silent = self.params['silent'],
                     reg_lambda = self.params['lambda'],
-                    n_estimators = num_boost_round
+                    n_estimators = num_boost_round,
+                    n_jobs=20,
                 ),
                 # param_grid = paramsGrids,
                 param_grid = {k:v},
@@ -319,13 +308,17 @@ def getOof(clf, trainX, trainY, testX, nFold=5, stratify=False, weight=None):
 def main():
     # 准备数据
     startTime = datetime.now()
-    df = importDf('../data/train_fea_special_sample.csv')
-    # df = importDf('../data/train_fea_special.csv')
+    # df = importDf('../data/train_fea_special_sample.csv')
+    df = importDf('../data/train_fea_special.csv')
     df['dataset'] = 0
-    predictDf = df.sample(frac=0.1)
-    # predictDf = importDf('../data/test_b_fea.csv')
+    # df2 = importDf('../data/train_fea_normal.csv')
+    # df2 = df2.sample(frac=0.30)
+    # df2['dataset'] = 1
+    # predictDf = df.sample(frac=0.1)
+    predictDf = importDf('../data/test_b_fea.csv')
     predictDf['dataset'] = -2
     originDf = pd.concat([df,predictDf], ignore_index=True)
+    # originDf = originDf.sample(frac=0.1)
     print('prepare dataset time:', datetime.now()-startTime)
 
     # 特征处理
@@ -344,6 +337,7 @@ def main():
         'user_gender_id','user_age_level','user_occupation_id','user_star_level',
         'context_page_id',#'hour',
         'shop_review_positive_rate','shop_score_service','shop_score_delivery','shop_score_description','shop_star_level','shop_review_num_level',
+        # 'special_date_dist',
 
         'user_his_trade_ratio','user_last_show_timedelta','user_his_show','user_lasthour_show','user_lastdate_show','user_lastdate_trade_ratio',#'user_his_trade',
         'item_his_trade_ratio','item_prop_num','item_lastdate_trade','item_his_trade','item_lastdate_trade_ratio','item_lastdate_trade_delta','item_lastdate_trade_ratio_delta','item_lastdate_show_delta','item_lastdate_show',#item_his_show','item_his_show_delta','item_his_show_perday','item_his_trade_perday','item_his_show_ratio','item_his_show_delta',
@@ -389,6 +383,7 @@ def main():
     modelName = "xgboost2B"
     startTime = datetime.now()
     xgbModel = XgbModel(feaNames=fea)
+    # xgbModel.gridSearch(df[fea].values, df['is_trade'].values)
     xgbModel.trainCV(df[fea].values, df['is_trade'].values)#, weight=df['weight'].values
     xgbModel.getFeaScore(show=True)
     xgbModel.clf.save_model('%s.model'%modelName)
@@ -398,8 +393,8 @@ def main():
     predictDf.loc[:,'predicted_score'] = xgbModel.predict(predictDf[fea].values)
     print("预测结果：\n",predictDf[['instance_id','predicted_score']].head())
     print('预测均值：', predictDf['predicted_score'].mean())
-    # exportResult(predictDf[['instance_id','predicted_score']], "%s.txt" % modelName)
-    # exportResult(predictDf[['instance_id','predicted_score','hour']], "%s_hashour.txt" % modelName)
+    exportResult(predictDf[['instance_id','predicted_score']], "%s.txt" % modelName)
+    exportResult(predictDf[['instance_id','predicted_score','hour']], "%s_hashour.txt" % modelName)
 
     # 生成stacking数据集
     df['predicted_score'] = np.nan
@@ -415,7 +410,7 @@ def main():
     print('7th train predict aver:', df.loc[df.date=='2018-09-07','predicted_score'].mean())
     print('test predict: \n',predictDf[['instance_id','predicted_score']].head())
     print('test predict aver:', predictDf['predicted_score'].mean())
-    exit()
+    # exit()
     exportResult(df[['instance_id','predicted_score']], "%s_oof_train.csv" % modelName)
     exportResult(predictDf[['instance_id','predicted_score']], "%s_oof_test.csv" % modelName)
 
